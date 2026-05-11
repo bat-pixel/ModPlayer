@@ -12,6 +12,19 @@ public:
 
     bool IsPlaying() const { return playing_; }
 
+    // ── Visualization ─────────────────────────────────────────────────────────
+    // Written by the audio thread; read by the UI. Minor tearing is fine.
+    static constexpr int kScopeLen = 256;
+    struct ChannelVis {
+        std::array<float, kScopeLen> scope{};
+        int      scopePos = 0;   // next write index (mod kScopeLen)
+        float    peak     = 0.f; // smoothed amplitude 0..1
+        uint8_t  vol      = 0;
+        uint16_t period   = 0;
+        bool     active   = false;
+    };
+    std::array<ChannelVis, MOD_CHANNELS> vis{};
+
 private:
     struct Channel {
         int      sampleIdx  = -1;   // index into mod->sampleData; -1 = silent

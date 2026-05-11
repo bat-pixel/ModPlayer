@@ -8,6 +8,7 @@
 #include <format>
 #include <filesystem>
 #include <algorithm>
+#include <vector>
 
 #define MAX_LOADSTRING 100
 
@@ -163,12 +164,13 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
         std::wstring(g_mod.songName, g_mod.songName + strlen(g_mod.songName)));
 
     HWND hWnd = CreateWindowW(szWindowClass, title.c_str(), WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, 0, 480, 120, nullptr, nullptr, hInstance, nullptr);
+        CW_USEDEFAULT, 0, 488, 340, nullptr, nullptr, hInstance, nullptr);
 
     if (!hWnd) return FALSE;
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
+    SetTimer(hWnd, 1, 33, nullptr);  // ~30 fps repaint for visualizer
     return TRUE;
 }
 
@@ -196,11 +198,127 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     case WM_PAINT: {
         PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hWnd, &ps);
+        HDC hdcReal = BeginPaint(hWnd, &ps);
+
+        RECT rc;
+        GetClientRect(hWnd, &rc);
+        const int W = rc.right;
+        const int H = rc.bottom;
+
+        // Double-buffer
+        HDC     hdc    = CreateCompatibleDC(hdcReal);
+        HBITMAP bmp    = CreateCompatibleBitmap(hdcReal, W, H);
+        HBITMAP oldBmp = static_cast<HBITMAP>(SelectObject(hdc, bmp));
+
+        // Clear background
+        HBRUSH bgBrush = CreateSolidBrush(RGB(18, 18, 26));
+        FillRect(hdc, &rc, bgBrush);
+        DeleteObject(bgBrush);
+
+        // Layout
+        const int panelW = W / MOD_CHANNELS;
+        const int labelH = 22;
+        const int peakH  = 14;
+        const int scopeH = H - labelH - peakH - 4;
+
+        // L=blue, R=green
+        static const COLORREF kChColor[MOD_CHANNELS] = {
+            RGB(64, 148, 255), RGB(64, 220, 128),
+            RGB(64, 220, 128), RGB(64, 148, 255),
+        };
+        static const char* kChSide[MOD_CHANNELS] = { "L", "R", "R", "L" };
+
+        for (int c = 0; c < MOD_CHANNELS; ++c) {
+            const auto& cv  = g_mixer.vis[c];
+            const COLORREF  col = kChColor[c];
+            const int x0 = c * panelW;
+
+            // Panel divider
+            HPEN divPen = CreatePen(PS_SOLID, 1, RGB(45, 45, 58));
+            HPEN oldPen = static_cast<HPEN>(SelectObject(hdc, divPen));
+            MoveToEx(hdc, x0 + panelW - 1, 0, nullptr);
+            LineTo(hdc, x0 + panelW - 1, H);
+            SelectObject(hdc, oldPen);
+            DeleteObject(divPen);
+
+            // Label
+            int noteIdx = cv.active ? PeriodToNoteIndex(cv.period, 0) : -1;
+            char label[40];
+            if (cv.active)
+                sprintf_s(label, "CH%d %s  %s  v%d", c + 1, kChSide[c],
+                          NoteName(noteIdx), static_cast<int>(cv.vol));
+            else
+                sprintf_s(label, "CH%d %s", c + 1, kChSide[c]);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, col);
+            RECT lr = { x0 + 4, 2, x0 + panelW - 2, labelH };
+            DrawTextA(hdc, label, -1, &lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
+
+            // Scope background
+            RECT sr = { x0, labelH, x0 + panelW - 1, labelH + scopeH };
+            HBRUSH scopeBg = CreateSolidBrush(RGB(10, 11, 16));
+            FillRect(hdc, &sr, scopeBg);
+            DeleteObject(scopeBg);
+
+            // Centre line
+            HPEN gridPen = CreatePen(PS_SOLID, 1, RGB(32, 36, 48));
+            oldPen = static_cast<HPEN>(SelectObject(hdc, gridPen));
+            int cy = labelH + scopeH / 2;
+            MoveToEx(hdc, x0, cy, nullptr);
+            LineTo(hdc, x0 + panelW - 1, cy);
+            SelectObject(hdc, oldPen);
+            DeleteObject(gridPen);
+
+            // Oscilloscope waveform
+            const int pts = panelW - 2;
+            if (pts > 0 && (cv.active || cv.peak > 0.001f)) {
+                HPEN wavePen = CreatePen(PS_SOLID, 1, col);
+                oldPen = static_cast<HPEN>(SelectObject(hdc, wavePen));
+
+                std::vector<POINT> poly(static_cast<size_t>(pts));
+                constexpr int kLen = ModMixer::kScopeLen;
+                for (int x = 0; x < pts; ++x) {
+                    int idx = (cv.scopePos + x * kLen / pts) & (kLen - 1);
+                    float samp = cv.scope[idx];
+                    int sy = cy - static_cast<int>(samp * (scopeH / 2 - 2));
+                    sy = std::clamp(sy, labelH + 1, labelH + scopeH - 2);
+                    poly[x] = { x0 + 1 + x, sy };
+                }
+                Polyline(hdc, poly.data(), pts);
+
+                SelectObject(hdc, oldPen);
+                DeleteObject(wavePen);
+            }
+
+            // Peak bar
+            const int peakY = labelH + scopeH + 2;
+            RECT pbg = { x0 + 2, peakY, x0 + panelW - 2, peakY + peakH - 2 };
+            HBRUSH pbgBrush = CreateSolidBrush(RGB(22, 24, 34));
+            FillRect(hdc, &pbg, pbgBrush);
+            DeleteObject(pbgBrush);
+
+            const int peakPx = static_cast<int>(cv.peak * (panelW - 4));
+            if (peakPx > 0) {
+                RECT pfill = { x0 + 2, peakY, x0 + 2 + peakPx, peakY + peakH - 2 };
+                HBRUSH pfBrush = CreateSolidBrush(col);
+                FillRect(hdc, &pfill, pfBrush);
+                DeleteObject(pfBrush);
+            }
+        }
+
+        BitBlt(hdcReal, 0, 0, W, H, hdc, 0, 0, SRCCOPY);
+        SelectObject(hdc, oldBmp);
+        DeleteObject(bmp);
+        DeleteDC(hdc);
+
         EndPaint(hWnd, &ps);
         break;
     }
+    case WM_TIMER:
+        InvalidateRect(hWnd, nullptr, FALSE);
+        break;
     case WM_DESTROY:
+        KillTimer(hWnd, 1);
         PostQuitMessage(0);
         break;
     default:

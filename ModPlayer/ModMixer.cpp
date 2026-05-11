@@ -61,6 +61,7 @@ void ModMixer::Init(const ModFile& mod, int sampleRate)
     breakToRow_  = false;
     playing_     = true;
     lpL_ = lpR_  = 0.f;
+    vis          = {};
     UpdateSamplesPerTick();
     sampleCountdown_ = 0;   // fire ProcessTick immediately on the first Mix() call
 }
@@ -89,25 +90,51 @@ void ModMixer::Mix(float* stereo, int numFrames)
 
         for (int c = 0; c < MOD_CHANNELS; ++c) {
             Channel& ch = ch_[c];
-            if (ch.sampleIdx < 0) continue;
+            auto&    cv = vis[c];
+
+            if (ch.sampleIdx < 0) {
+                cv.peak  *= 0.9998f;
+                cv.active = false;
+                cv.scope[cv.scopePos & (kScopeLen - 1)] = 0.f;
+                ++cv.scopePos;
+                continue;
+            }
 
             const auto& pcm = mod_->sampleData[ch.sampleIdx];
             if (pcm.empty()) { ch.sampleIdx = -1; continue; }
 
-            // Linear interpolation
+            const SampleInfo& si = mod_->samples[ch.sampleIdx];
+
+            // Loop-aware linear interpolation: s1 wraps to loop start at boundary
             const auto  p0  = static_cast<size_t>(ch.pos);
             const float frc = static_cast<float>(ch.pos - static_cast<double>(p0));
-            const float s0  = (p0     < pcm.size()) ? pcm[p0]     / 128.f : 0.f;
-            const float s1  = (p0 + 1 < pcm.size()) ? pcm[p0 + 1] / 128.f : s0;
-            const float s   = s0 + (s1 - s0) * frc;
-            const float v   = ch.vol / 64.f;
+            const float s0  = (p0 < pcm.size()) ? pcm[p0] / 128.f : 0.f;
+            float s1;
+            if (si.repeatLength > 2) {
+                const size_t loopEnd = si.repeatOffset + si.repeatLength;
+                s1 = ((p0 + 1 < loopEnd) && (p0 + 1 < pcm.size()))
+                   ? pcm[p0 + 1] / 128.f
+                   : (si.repeatOffset < pcm.size() ? pcm[si.repeatOffset] / 128.f : s0);
+            } else {
+                s1 = (p0 + 1 < pcm.size()) ? pcm[p0 + 1] / 128.f : s0;
+            }
+            const float s = s0 + (s1 - s0) * frc;
+            const float v = ch.vol / 64.f;
 
             L += s * v * kPanL[c];
             R += s * v * kPanR[c];
 
+            // Visualization
+            const float chSamp = s * v;
+            cv.scope[cv.scopePos & (kScopeLen - 1)] = chSamp;
+            ++cv.scopePos;
+            cv.peak   = std::max(cv.peak * 0.9998f, std::abs(chSamp));
+            cv.vol    = ch.vol;
+            cv.period = ch.period;
+            cv.active = true;
+
             ch.pos += ch.step;
 
-            const SampleInfo& si = mod_->samples[ch.sampleIdx];
             if (si.repeatLength > 2) {
                 const double loopEnd = static_cast<double>(si.repeatOffset + si.repeatLength);
                 if (ch.pos >= loopEnd)

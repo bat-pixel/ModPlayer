@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"C:\\Users\\gusta\\source\\repos\\ModPlayer\" && git add -A && git diff --cached --quiet || (git commit -m \"Auto-commit: Claude session changes\" && git push)"
+          }
+        ]
+      }
+    ]
+  }
+}

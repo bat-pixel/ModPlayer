@@ -1,0 +1,212 @@
+
+				    REVIEW
+
+		       [43m  OctaMED 3.0/4.0 Professional [0m
+
+			      by[1m Alex Van Starrex
+
+   BIOPIC: Alex has produced hundreds of disks of creative work, since buying
+   his Amiga 500 in 1988. He is best known for his MED music - which has been
+   featured by "Amiga Computing" magazine, "Jumpdisk" and the Fish Disks. His
+   "Art of MED" disk is available in England (where it was a top-selling disk
+   in late 1991), America, Japan and Australia. Besides being a devoted Amiga
+   enthusiast, Alex is a law-student, a writer and a mean guitarist.  
+
+[32m    <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+[33m  Introduction:
+
+    For those who have yet to find out, OctaMED is a variation of "MED", once
+  the best freely-distributable music-program available for the Amiga - I say
+  "once" because not only has the program gained serious competition from the
+  likes of ProTracker (especially the excellent version 2.2), but it's become
+  rather complex - at least for beginners - and slow since the first versions
+  appeared. Now further development is said to have been ceased.
+
+    The pinnacle of MED's development was version 3.00 - a powerful, fast and
+  easy-to-use program. Later versions used medium-resolution screens and some
+  rather-unnecessary graphics-logos - cutting into startup-time, slowing down
+  overall performance and requiring at least 1 meg to run on. Version 3.22 is
+  now being advertised by its programmer as the final version to be released,
+  with attention being directed to its eight-channel equivalent, OctaMED.
+
+    I wasn't overly fond of the early versions of OctaMED. It seemed that too
+  many corners had been cut in order for it to achieve the impossible: having
+  an "eight-channel" sequencer that operated on a four-channel computer. Many
+  of the features that originally made me prefer MED over its rival program -
+  SoundTracker - either weren't available, or didn't work as well in extended
+  mode. The program seemed more like an eight-channel version of SoundTracker
+  that a variation of MED, anyhow, without the benefit of MED's greater tempo
+  range - and added to this were an overall loss of sound-clarity and volume,
+  a limited facility for instrument-use and a huge drain on processing power.
+
+    But OctaMED's programmer, Teijo Kinnunen, has never been one to surrender
+  in the face of adversity - so "improvements" started to appear. Version 2.0
+  of OctaMED was in my opinion a transitionary one - since the innovations it
+  introduced (chiefly the ability to create songs in 5-7 channels, and a form
+  of single-bar stave-notation) had not been sufficiently thought-through for
+  them to be actually useful - which is where OctaMED 3.00 and 4.00 come into
+  the picture.
+
+    For all my enthusiatic support of the normal MED program - not to mention
+  its part in the creation of around 150 songs - I'd found OctaMED 1.00 to be
+  a curious novelty and v.2.00 to be a half-baked attempt to improve it. What
+  was version 3.00 going to be like? I wasn't particularly keen to find out -
+  so it was with some misgivings that I loaded a "review" copy from Megadisc.
+  Now that I've been using it for a while, though, I'm happy to say that it's
+  a much better program than either of its predecessors.
+
+    Having had the opportunity now to use OctaMED 3.00 for a couple of weeks,
+  I've completed a collection of songs with it - free-plug for my "OctaStuff"
+  disk - and gotten used to its very different means of operation. But before
+  I could put the finishing touches on the review, Amiganuts United Australia
+  sent me out Version 4.00. Luckily, OctaMED 4.00 it isn't too different from
+  version 3.00 - so most of my comments will apply equally to both versions.
+    
+[33m  Features:
+
+    Purchasers of July 1992's "CU Amiga" magazine should be familiar with the
+  workings of OctaMED 3.00 - since it is contained in one of the cover-disks. 
+  Version 4.00 comes with a comprehensive 126-page manual, plus a second disk
+  of samples and example song-parts. Total cost of the package from Amiganuts
+  United Australia is $ 85.00.
+
+    Here are just a few of the new features of version 3.00 - rated according
+  to my order of "importance" (as readers and users will have their own ideas
+  about such things - especially if they have a MIDI system running):
+
+  - the ability to "tap write" in 8-channel mode (i.e. as the music plays);
+  - improved quantisation-support (an essential part of the above feature);
+  - tempos can now be varied, from the 3 or 4 "useful" SoundTracker-speeds;
+  - blocks can be "scrolled" and played a line at a time - even backwards!;
+  - block-length has been expanded - allowing up to 3,200 lines per block!;
+  - there are new effects, including combinations of e.g. volume and pitch;
+  - instruments can be fine-tuned, edited or even drawn/edited in freehand;
+  - there's now a much larger, and more comprehensive, file-requestor used;
+  - a constant readout of system ram and chip-memory is displayed onscreen;
+  - new "module" formats have been developed, for loading and saving songs;
+  - the ability to use powerpacked files - including songs and instruments; 
+  - a "high-quality" playback function is supported, for 68020+ processors;
+  - there are extensive "two-way" program-control functions for MIDI-users.
+
+    As can be seen, these point to a much-improved version of the program, if
+  perhaps running a little short of the "Professional" tag. I was starting to
+  wonder what sort of "professional" would use MED/OctaMED, anyway, when news
+  of the English "Urban Shakedown" duo arrived ("Amiga Format": August, 1992)
+  - it seems they use two Amigas running MED simultaneously, to produce dance
+  music which is both released and charting well (and received "single of the
+  week" coverage in the English music-press). Perhaps the "high-quality" mode
+  of OctaMED means that this may now be possible on a single machine!
+
+    Anyway, it's now time to mention some of the less-desirable "features" of
+  the program.
+
+[33m  Problems:
+
+    I'll mention these at length, since they're going to catch-out any unwary
+  users and may spoil their enjoyment of the program as a whole:
+
+  WORKBENCH LAYOUT: "Booting" with the supplied disk loads a special screen -
+  like a huge advertisement - covering half the Workbench area, and obscuring
+  any disk-icons that may be underneath it. This isn't too practical and with
+  the large program and OctaMEDPlayer icons, uses up a lot of memory. I would
+  expect this to be changed, since, amongst other things, it means that users
+  can't access the "accessory" disk from the "OctaMED" Workbench. 
+   
+  FILE SIZE: MED always used to save its song+samples modules in a compressed
+  format so that a MED module was always rather smaller than its SoundTracker
+  equivalent. OctaMED 3.00 has gone the opposite way: file sizes can be huge.
+  To give an example, I loaded a 63k OctaMED 1.00 song into version 3.00, and
+  then saved it without any further modification: the new version had "grown"
+  to 127k - and one of my new songs had even grown over 400k before I saw fit
+  to "prune" it. I haven't conducted any tests with powerpacking files as yet
+  - but I can indicate that it helps to save modules in the "old" MM0-format; 
+
+  SONG-VERSION INCOMPATIBILITY: I'd already noticed alarming and undocumented
+  incompatibility problems between MED 3.00 and 3.11 songs: songs produced on
+  version 3.00 and played on 3.11 (or its equivalent MEDPlayer) never managed
+  to "recover" from "volume fades" of instruments. OctaMED 3.00 has now taken
+  an even greater step towards incompatibility with earlier versions by using
+  an altered note-definition - so songs created with it cannot be loaded into
+  earlier versions of OctaMED;
+
+  PROCESSOR REQUIREMENTS: OctaMED is quite useful without a 68020+ processor,
+  provided that you choose the "Dep 2" preference - which runs the program in
+  four colours, instead of eight. It becomes rather difficult to tap-write in
+  fast tempos however, and the "high-quality" playback option is unavailable.
+
+[33m  Practical Use:
+
+    Despite all the niggling problems, I found myself enjoying OctaMED 3.00 -
+  its tap-writing, line-playing and tempo-varying facilities all help to make
+  this the first really "useable" version of OctaMED. I even composed a piece
+  of music during the first session (which may or may not be on this issue of
+  Megadisc), which surprised me since I hadn't created any new songs for some
+  time. 
+
+    A couple of weeks and songs down the track, that enjoyment hasn't ceased.
+  Mind you, it does take a while to learn how to make best use of the "extra"
+  channels - and there is now much more detail-work required to flesh-out, or
+  orchestrate a simple musical idea. But the beauty in hearing a well-written
+  eight-channel passage makes it easy to "forget about" four-channel music. I
+  even find it difficult now to work with four-channels: though its music has
+  higher-fidelity, its composing-restrictions are sometimes difficult to bear
+  (i.e. it's too easy to run-out of channels).
+   
+    It didn't take long to get used to the new song file-size - it just means
+  that fewer songs will now fit on a standard floppy-disk. In turn, this will
+  have an effect on the music that users create with it. And - as I mentioned
+  earlier - it helps to save a song in MM0 format (as opposed to "MM1") since
+  significant file-reductions (around 20%) are possible this way.
+
+[33m  Version 4.00 and the Manual:
+
+    I'll discuss these together, since it's a fair bet that many readers will
+  either settle for the version 3.00 CU cover-disk or else "go the whole hog"
+  and get version 4.00 with the manual.
+
+    The manual is practically a necessity (unless you're experienced in using
+  earlier versions of OctaMED), since the "how-to-use" text-file has now been
+  deleted from disk (the all-too-brief introduction in July's CU-Amiga leaves
+  out many of OctaMED 3.00's important features e.g. the keyboard-shortcuts).
+
+    Version 4.00 of OctaMED isn't greatly different to version 3.00; its main
+  claim to fame is to be free of a couple of bugs. There are a few "cosmetic"
+  enhancements however and the program's copyright situation has changed, but
+  on the whole it isn't a major upgrade. The accessory-disk and manual really
+  make the upgrade-package (particularly the latter).
+
+    The manual is in a plastic-covered, plastic ring-bound format i.e. useful
+  for keeping open at whatever page you wish without excessive coffee stains.
+  It is well-written and comprehensive, though surprisingly it lacks an index
+  or a contents-page. Instructions are contained for hard-disk installing and
+  MIDI-initialisation, amongst other things, and all of the program-functions
+  are covered in great detail.
+
+    Of course there are other ways to learn about OctaMED, especially loading
+  and/or modifying other people's songs. Interestingly enough, there is a new
+  program available - called AMFC (Amiga Music File Concerter) V2 - which can
+  convert StarTrekker, Oktalyzer and even SMUS files into OctaMED format (and
+  which, in time, will do the opposite, plus do MusicX-conversions) - contact
+  Amiganuts for more details. AMOS will soon support OctaMED files, also.
+
+[33m  Conclusions:
+
+    OctaMED Professional is the "king" of stand-alone music-sequencers on the
+  Amiga, but the results that users achieve with it will only ever be as good
+  as the musical-ability of those users. It won't make another Stravinsky out
+  of a tone-deaf novice, but it's just the thing for experienced users of MED
+  or SoundTracker/ProTracker who are looking to expand their musical horizons
+  (with or without MIDI).
+
+    All in all, a delightful, engrossing and rewarding program to use.
+
+           Review copies from: Amiganuts United Australia
+                               199 Taylor St
+                               TOOWOOMBA QLD 4350
+
+           Ph: (076) 346948; Message/fax: (076) 331172
+
+[32m    <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+

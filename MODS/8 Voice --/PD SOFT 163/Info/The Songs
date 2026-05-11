@@ -1,0 +1,110 @@
+
+        [43m     SOME NOTES ON THE SONGS AND THE "OCTAMEDPLAYER" PROGRAM   [0m         
+
+[32m    <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+[33m   "OCTAMEDPLAYER":
+[33m   ---------------
+
+       It's quite easy to play any of the songs in the "Music" drawer - just
+  double-click the song-icon of the one you'd like to hear.  Once the player
+  program has been activated - i.e. when it is visible from Workbench" - you
+  can also perform the following functions:
+
+  - Other songs can be selected by clicking inside the the "song-title" area
+    then typing in the new song-name (capitals aren't required) and pressing
+    return. The "Start" button must be then pressed for the song to start;
+
+  - Pressing the "Stop" button pauses the song; it can then be continued by
+    pressing the "Cont(inue)" button, or re-started by pressing "Start";
+
+  - To stop the music playing altogether (and return memory to the system),
+    click the button in the top left-hand corner of the "MEDPlayer" window.
+
+       There are more advanced song-loading capabilities for WB 2.0 owners -
+  who can use the "File Requestor" (FReq) option. In any event, "MIDI" can't
+  be used with these songs; nor can the "<" and ">" buttons, which allow the
+  switching of songs saved in "multi-module" format.
+
+       Song-information is presented like "Sg01/01 S:001/010 B:00/08 L0000",
+  where:
+
+  - "Sg" shows the current song, and number of songs in the current module;
+  - "S" shows the position and length of the playing sequence list;
+  - "B" shows current block number and total number of blocks in the song;
+  - "L" is the current line-number.
+
+       Watch out for possible problems with song icon-defaults (the path to
+  the OctaMEDPlayer must be specified), if you want to use OctaMED songs on
+  other disks. Other than that, there shouldn't be any trouble with them.
+
+[33m   THE SONGS:
+[33m   ---------
+
+       It's been a fairly crazy time for me over the last few weeks, due to
+  the combined pressures of work, university and personal commitments. As a
+  result, these songs have been composed with little thought for posterity.
+  Little use has been made of OctaMED 3.00's many new features - especially
+  the note-effect commands - but that doesn't mean that I disown the tracks
+  as a result.
+
+       I should point out, though that I'm more interested in exploring the
+  potential for creating new "soundscapes" with a program such as OctaMED -
+  rather than using it to churn-out something more familiar or "trendy". My
+  background as a musician and appreciator of music extends to all fields -
+  rock, jazz, classical, ethnic and beyond. This obviously has an effect on
+  the music which I compose; which can sometimes gets a little strange as I
+  stretch and merge the boundaries of individual styles but the fundamental
+  "musicality" remains intact. 
+
+       Anyway, it's time for a few words about the songs:
+ 
+  "QUESTION": As previously mentioned, this was created from the instruments
+  of the OctaMED 3.00 demo-song. Since I didn't use my "own" instruments the
+  sound was rather diminuitive and tinny, so I "boosted" the instruments. In
+  terms of composition-style, I wanted to get away from the long (and rather
+  protracted) style of composition that I used on "OCTAROCK" with its single
+  ideas being drawn-out almost to the point of tedium - instead, I've used a
+  series of quick juxtapositions, which help to develop the song at a faster
+  faster rate. The song-title comes from the music's enigmatic nature;
+
+  "PROBLEM": This is basically just a "remix" of a track from "OctaSongs". I
+  had written a number of variations for the track - but deciding to keep it
+  simple and straightforward, so shortened it accordingly. My only regret is
+  I couldn't create a nice saxophone solo for the song. Listeners might note
+  that I haven't attempted to make this a "dance" song; the movement implied
+  through the rhythmic variations are purely for aural stimulation. The song
+  -title arises because of the problems that I've had with the song, since I
+  first wrote it (almost a year ago) - plus its medical (scratchy) nature;
+
+  "REPORT": Another remix/rewrite of an "OctaSongs" track - but, with almost
+  almost nothing in common with its forebear, it's virtually a new track. It
+  is basically a "textbook" example of funk-progression, orchestrated into a
+  synthesiser-based composition - but with classical variations. By breaking
+  up the song into a series of vignettes (most importantly by "interrupting"  
+  the rhythm-track, from time to time), a feeling of spaciousness is created
+  within the song. The title comes from the fact that I wrote this track and
+  the OctaMED review at approximately the same time - using the character of
+  the music to influence my thoughts and ideas about the program;
+
+  "FAREWELL": This is a song with a rather steep appreciation (as opposed to
+  learning) curve. This is overcome within the first few minutes though, and
+  the song then has some wonderfully sublime moments - from both a sonic and
+  compositional point of view. The song also takes some quite colossal risks
+  in its variations, even running juxtapositions of tuning (against the more
+  familiar ones of tempo, style and form, which normally appear in my work).
+  The "title" is the last word before the huge climax in "Awaken" - from the
+  Yes album "Going for the One" - whose central section is suggestive of one
+  the movements of this song (and of course, it's also the last track on the
+  disk).
+
+       If you get tired of watching the "OctaMEDPlayer" display (while these
+  songs are playing) and want something else to look at, try the "AVS-Pic" -
+  hopefully you'll find sufficient visual information to keep your mind busy
+  for a while longer. Unfortunately the display-program quits out of the pic
+  when you press the left mouse-button, but it can easily be loaded again.
+
+                                                                      A.V.S.
+
+[32m    <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+

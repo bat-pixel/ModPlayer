@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh auth *)",
+      "Bash(git init *)",
+      "Bash(git branch *)",
+      "Bash(gh repo *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git config *)",
+      "PowerShell(ls \"C:\\\\Users\\\\gusta\\\\source\\\\repos\\\\ModPlayer\\\\MODS\" -Recurse | ForEach-Object { $_.FullName })"
+    ]
+  }
+}

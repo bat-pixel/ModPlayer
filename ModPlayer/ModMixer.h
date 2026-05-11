@@ -36,6 +36,7 @@ private:
     void AdvanceRow();
     void TriggerNote(int ch, const Note& n);
     void ApplyTickEffects();
+    uint16_t FinetunedPeriod(uint16_t period, int sampleIdx) const;
 
     const ModFile* mod_  = nullptr;
     int            rate_ = 44100;
@@ -51,8 +52,11 @@ private:
     int  sampleCountdown_ = 0;
     bool playing_         = false;
 
-    bool jumpToOrder_ = false;
-    int  jumpOrder_   = 0;
-    bool breakToRow_  = false;
-    int  breakRow_    = 0;
+    bool  jumpToOrder_ = false;
+    int   jumpOrder_   = 0;
+    bool  breakToRow_  = false;
+    int   breakRow_    = 0;
+
+    float lpL_ = 0.f;   // Amiga low-pass filter state (left)
+    float lpR_ = 0.f;   // Amiga low-pass filter state (right)
 };

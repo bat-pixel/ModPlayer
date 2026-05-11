@@ -32,6 +32,19 @@ static inline double StepForPeriod(uint16_t period, int rate)
     return MOD_PAL_CLOCK / (static_cast<double>(period) * 2.0 * rate);
 }
 
+// Returns the finetune-adjusted period for a given note period and sample.
+// ProTracker stores finetune as signed –8..+7 in the sample header.
+uint16_t ModMixer::FinetunedPeriod(uint16_t period, int sampleIdx) const
+{
+    if (sampleIdx < 0 || period == 0) return period;
+    const int8_t ft = mod_->samples[sampleIdx].finetune;
+    if (ft == 0) return period;
+    const int ftRaw = (ft >= 0) ? static_cast<int>(ft) : (static_cast<int>(ft) + 16);
+    const int noteIdx = PeriodToNoteIndex(period, 0);
+    if (noteIdx < 0) return period;   // period not in table, use as-is
+    return kPeriodTable[ftRaw & 0xF][noteIdx];
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 void ModMixer::Init(const ModFile& mod, int sampleRate)
@@ -47,6 +60,7 @@ void ModMixer::Init(const ModFile& mod, int sampleRate)
     jumpToOrder_ = false;
     breakToRow_  = false;
     playing_     = true;
+    lpL_ = lpR_  = 0.f;
     UpdateSamplesPerTick();
     sampleCountdown_ = 0;   // fire ProcessTick immediately on the first Mix() call
 }
@@ -105,8 +119,12 @@ void ModMixer::Mix(float* stereo, int numFrames)
             }
         }
 
-        stereo[i * 2]     = L * 0.5f;
-        stereo[i * 2 + 1] = R * 0.5f;
+        // Amiga-style one-pole low-pass (~3.3 kHz at 44100 Hz)
+        static constexpr float kLpAlpha = 0.37f;
+        lpL_ += kLpAlpha * (L * 0.5f - lpL_);
+        lpR_ += kLpAlpha * (R * 0.5f - lpR_);
+        stereo[i * 2]     = lpL_;
+        stereo[i * 2 + 1] = lpR_;
     }
 }
 
@@ -173,7 +191,7 @@ void ModMixer::TriggerNote(int c, const Note& n)
 
     // Effects 3xx/5xx: portamento — store target but suppress retrigger
     if (n.effect == 0x3 || n.effect == 0x5) {
-        if (n.period > 0) ch.portaTarget = n.period;
+        if (n.period > 0) ch.portaTarget = FinetunedPeriod(n.period, ch.sampleIdx);
         if (n.effect == 0x3 && n.param > 0) ch.portaSpeed = n.param;
         // Bootstrap: if no prior period, start at target so step is non-zero
         if (ch.period == 0 && ch.portaTarget > 0) {
@@ -182,9 +200,10 @@ void ModMixer::TriggerNote(int c, const Note& n)
             ch.pos    = 0.0;
         }
     } else if (n.period > 0) {
-        // All other effects: normal retrigger
-        ch.period = n.period;
-        ch.step   = StepForPeriod(n.period, rate_);
+        // All other effects: normal retrigger with finetune applied
+        const uint16_t adjPeriod = FinetunedPeriod(n.period, ch.sampleIdx);
+        ch.period = adjPeriod;
+        ch.step   = StepForPeriod(adjPeriod, rate_);
         ch.pos    = 0.0;
         ch.vibPhase = 0;    // reset vibrato phase on new note
     }
@@ -272,7 +291,7 @@ void ModMixer::ApplyTickEffects()
         case 0x3:   // Portamento to Note
         case 0x5:   // Portamento to Note + Volume Slide
             if (ch.portaTarget > 0 && ch.period > 0) {
-                const int delta = ch.portaSpeed * 4;
+                const int delta = ch.portaSpeed;
                 if (ch.period < ch.portaTarget)
                     ch.period = static_cast<uint16_t>(
                         std::min(static_cast<int>(ch.portaTarget),

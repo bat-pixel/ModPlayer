@@ -32,7 +32,8 @@
       "PowerShell(head *)",
       "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\VC\\\\vcpkg\\\\vcpkg.exe\" install libopenmpt:x64-windows 2>&1 | Select-Object -Last 25)",
       "PowerShell(& \"C:\\\\dev\\\\vcpkg\\\\vcpkg.exe\" integrate install 2>&1)",
-      "Bash(gh pr create --title 'Add libopenmpt backend with IMixer abstraction layer' --body ' *)"
+      "Bash(gh pr create --title 'Add libopenmpt backend with IMixer abstraction layer' --body ' *)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\gusta\\\\source\\\\repos\\\\ModPlayer\\\\ModPlayer\\\\ModPlayer.vcxproj\" /p:Configuration=Debug /p:Platform=x64 /v:m 2>&1)"
     ]
   }
 }

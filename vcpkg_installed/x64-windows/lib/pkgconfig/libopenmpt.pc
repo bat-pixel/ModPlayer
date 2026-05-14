@@ -1,0 +1,15 @@
+prefix=${pcfiledir}/../..
+
+exec_prefix=${prefix}
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: libopenmpt
+Description: Tracker module player based on OpenMPT
+Version: 0.8.4
+Requires.private: zlib vorbis vorbisfile libmpg123
+Libs: "-L${prefix}/lib" -lopenmpt
+Libs.private: 
+Cflags: "-I${prefix}/include"
+
+

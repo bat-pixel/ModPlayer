@@ -19,7 +19,20 @@
       "WebFetch(domain:bugs.openmpt.org)",
       "WebFetch(domain:forum.openmpt.org)",
       "WebFetch(domain:www.aes.id.au)",
-      "WebFetch(domain:www.eblong.com)"
+      "WebFetch(domain:www.eblong.com)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\gusta\\\\source\\\\repos\\\\ModPlayer\" -Recurse)",
+      "Bash(Select-Object FullName)",
+      "Bash(Format-List)",
+      "WebFetch(domain:buildbot.openmpt.org)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:source.openmpt.org)",
+      "Bash(git checkout *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(C:\\\\dev\\\\vcpkg\\\\vcpkg.exe install libopenmpt:x64-windows 2>&1 | Select-Object -Last 20)",
+      "PowerShell(head *)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\VC\\\\vcpkg\\\\vcpkg.exe\" install libopenmpt:x64-windows 2>&1 | Select-Object -Last 25)",
+      "PowerShell(& \"C:\\\\dev\\\\vcpkg\\\\vcpkg.exe\" integrate install 2>&1)",
+      "Bash(gh pr create --title 'Add libopenmpt backend with IMixer abstraction layer' --body ' *)"
     ]
   }
 }

@@ -1,0 +1,79 @@
+Package: vcpkg-cmake
+Version: 2024-04-23
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 445851787a2072e0294c11248cb2e2e7c522037eae66fa75ab9a40cb01979873
+Status: install ok installed
+
+Package: zlib
+Version: 1.3.1
+Depends: vcpkg-cmake
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 19acd0f9ab13f828b3e20308dae8d2073f56bee2ca6c8757d1a62983141150a2
+Description: A compression library
+Status: install ok installed
+
+Package: vcpkg-cmake-config
+Version: 2024-05-23
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 326a49bf9819a7585eb6f002f1425220b2578ce8143e1d75862f84b852f1d784
+Status: install ok installed
+
+Package: yasm
+Version: 1.3.0
+Port-Version: 7
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 813527e04599f8d6fe03940b46cf8fb70b7f670fcb7ee975e16de2699afa40b0
+Description: Yasm is a complete rewrite of the NASM assembler under the new BSD License.
+Default-Features: tools
+Status: install ok installed
+
+Package: yasm
+Feature: tools
+Architecture: x64-windows
+Multi-Arch: same
+Description: Build yasm tools
+Status: install ok installed
+
+Package: mpg123
+Version: 1.33.4
+Depends: vcpkg-cmake, vcpkg-cmake-config, yasm
+Architecture: x64-windows
+Multi-Arch: same
+Abi: ccef05a0398fc29aa3f5b533e68d55e873aa4f6c533a622b1fb1e9c6a1552766
+Description: mpg123 is a real time MPEG 1.0/2.0/2.5 audio player/decoder for layers 1, 2 and 3 (MPEG 1.0 layer 3 also known as MP3).
+Status: install ok installed
+
+Package: libogg
+Version: 1.3.6
+Port-Version: 1
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: ffa2319f5c48015bbe257324459ac2c6fa95192e7219621135c49d13f64b1d2a
+Description: Ogg is a multimedia container format, and the native file and stream format for the Xiph.org multimedia codecs.
+Status: install ok installed
+
+Package: libvorbis
+Version: 1.3.7
+Port-Version: 4
+Depends: libogg, vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 1814761be5d394c6f637db7a512aefb2607850c9e01eab3b2d5130d010f0b5ff
+Description: Ogg Vorbis is a fully open, non-proprietary, patent-and-royalty-free, general-purpose compressed audio format
+Status: install ok installed
+
+Package: libopenmpt
+Version: 0.8.4
+Depends: libogg, libvorbis, mpg123, vcpkg-cmake, vcpkg-cmake-config, zlib
+Architecture: x64-windows
+Multi-Arch: same
+Abi: b41c4ef898071a074c8b1cb2d0de11f565b9ce65b82f5c12b1aa46b552a7ba54
+Description: A cross-platform C++ and C library to decode tracked music files (modules) into a raw PCM audio stream.
+Status: install ok installed
+

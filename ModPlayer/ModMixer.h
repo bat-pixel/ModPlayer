@@ -1,50 +1,39 @@
 #pragma once
+#include "IMixer.h"
 #include "ModFile.h"
 #include <array>
 
-class ModMixer {
+class ModMixer : public IMixer {
 public:
+    // Initialise (or reinitialise) with a loaded MOD file.
+    // Called from the UI thread while holding the audio mutex.
     void Init(const ModFile& mod, int sampleRate = 44100);
 
-    // Fills stereo interleaved float buffer [-1, 1].
-    // Called exclusively from the audio thread.
-    void Mix(float* stereo, int numFrames);
-
-    bool IsPlaying() const { return playing_; }
-
-    // ── Visualization ─────────────────────────────────────────────────────────
-    // Written by the audio thread; read by the UI. Minor tearing is fine.
-    static constexpr int kScopeLen = 256;
-    struct ChannelVis {
-        std::array<float, kScopeLen> scope{};
-        int      scopePos = 0;   // next write index (mod kScopeLen)
-        float    peak     = 0.f; // smoothed amplitude 0..1
-        uint8_t  vol      = 0;
-        uint16_t period   = 0;
-        bool     active   = false;
-    };
-    std::array<ChannelVis, MOD_CHANNELS> vis{};
+    void        Mix(float* stereo, int numFrames) override;
+    bool        IsPlaying()   const override { return playing_; }
+    const char* BackendName() const override { return "Native"; }
+    std::string SongTitle()   const override;
 
 private:
     struct Channel {
         int      sampleIdx  = -1;   // index into mod->sampleData; -1 = silent
         double   pos        = 0.0;  // fractional read position within PCM
-        double   step       = 0.0;  // pos increment per output frame (effective, incl. vibrato)
+        double   step       = 0.0;  // pos increment per output frame (incl. vibrato)
         uint8_t  vol        = 0;    // 0..64
         uint16_t period     = 0;    // base period (not modulated by vibrato)
 
-        // Portamento state (effects 1xx, 2xx, 3xx)
+        // Portamento (effects 1xx, 2xx, 3xx, 5xx)
         uint8_t  portaSpeed  = 0;
-        uint16_t portaTarget = 0;   // 3xx target period
+        uint16_t portaTarget = 0;
 
-        // Vibrato state (effects 4xx, 6xx)
+        // Vibrato (effects 4xx, 6xx)
         uint8_t  vibSpeed = 0;
         uint8_t  vibDepth = 0;
         uint8_t  vibPhase = 0;
         // bits 0-1: 0=sine 1=ramp-down 2=square 3=random; bit2=no phase retrigger
         uint8_t  vibWave  = 0;
 
-        // Tremolo state (effect 7xx)
+        // Tremolo (effect 7xx)
         uint8_t  tremSpeed = 0;
         uint8_t  tremDepth = 0;
         uint8_t  tremPhase = 0;

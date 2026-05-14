@@ -1,0 +1,5 @@
+include(CMakeFindDependencyMacro)
+find_dependency(ZLIB)
+find_dependency(mpg123 CONFIG)
+find_dependency(Vorbis CONFIG)
+include("${CMAKE_CURRENT_LIST_DIR}/libopenmpt-targets.cmake")

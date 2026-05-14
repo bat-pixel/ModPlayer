@@ -57,6 +57,11 @@ uint16_t ModMixer::FinetunedPeriod(uint16_t period, int sampleIdx) const
     return kPeriodTable[ftRaw & 0xF][noteIdx];
 }
 
+std::string ModMixer::SongTitle() const
+{
+    return mod_ ? mod_->songName : "";
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 void ModMixer::Init(const ModFile& mod, int sampleRate)

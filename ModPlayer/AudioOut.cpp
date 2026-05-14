@@ -1,6 +1,5 @@
 #include "framework.h"
 #include "AudioOut.h"
-#include "ModMixer.h"
 #include <algorithm>
 
 // ── FillBuffer ────────────────────────────────────────────────────────────────
@@ -60,7 +59,13 @@ DWORD WINAPI AudioOut::FillThread(LPVOID param)
 
 // ── Open / Close ──────────────────────────────────────────────────────────────
 
-bool AudioOut::Open(ModMixer* mixer)
+void AudioOut::SetMixer(IMixer* mixer)
+{
+    std::lock_guard<std::mutex> lk(fillMtx_);
+    mixer_ = mixer;
+}
+
+bool AudioOut::Open(IMixer* mixer)
 {
     mixer_ = mixer;
 

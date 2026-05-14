@@ -24,6 +24,7 @@
     <ProjectGuid>{7c947019-9b51-4040-8ed5-714550ebe485}</ProjectGuid>
     <RootNamespace>ModPlayer</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <VcpkgEnabled>true</VcpkgEnabled>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -133,6 +134,8 @@
   <ItemGroup>
     <ClInclude Include="AudioOut.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="IMixer.h" />
+    <ClInclude Include="LibOpenMptMixer.h" />
     <ClInclude Include="ModFile.h" />
     <ClInclude Include="ModMixer.h" />
     <ClInclude Include="ModPlayer.h" />
@@ -141,6 +144,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AudioOut.cpp" />
+    <ClCompile Include="LibOpenMptMixer.cpp" />
     <ClCompile Include="ModMixer.cpp" />
     <ClCompile Include="ModParser.cpp" />
     <ClCompile Include="ModPlayer.cpp" />
@@ -155,4 +159,15 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <!-- Copy openmpt.dll to output so the app can find it at runtime. -->
+  <Target Name="CopyOpenmptDll" AfterTargets="Build">
+    <ItemGroup>
+      <_OpenmptDll Include="C:\dev\vcpkg\installed\x64-windows\debug\bin\openmpt.dll"
+                   Condition="'$(Configuration)'=='Debug'" />
+      <_OpenmptDll Include="C:\dev\vcpkg\installed\x64-windows\bin\openmpt.dll"
+                   Condition="'$(Configuration)'!='Debug'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_OpenmptDll)" DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

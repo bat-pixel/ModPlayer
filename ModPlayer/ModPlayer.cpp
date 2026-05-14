@@ -4,6 +4,7 @@
 #include "ModPlayer.h"
 #include "ModFile.h"
 #include "ModMixer.h"
+#include "LibOpenMptMixer.h"
 #include "AudioOut.h"
 #include <format>
 #include <filesystem>
@@ -16,20 +17,22 @@ HINSTANCE hInst;
 WCHAR szTitle[MAX_LOADSTRING];
 WCHAR szWindowClass[MAX_LOADSTRING];
 
-static ModFile  g_mod;
-static ModMixer g_mixer;
-static AudioOut g_audio;
+static ModFile          g_mod;            // always kept in sync; needed by native backend
+static ModMixer         g_nativeMixer;    // our ProTracker engine
+static LibOpenMptMixer  g_omptMixer;      // libopenmpt engine
+static IMixer*          g_activeMixer = &g_nativeMixer;
+static AudioOut         g_audio;
 
 static std::vector<std::filesystem::path> g_modPaths;
 static int g_modIndex = 0;
 
+// ── File scanning ─────────────────────────────────────────────────────────────
+
 static bool IsModFilename(const std::filesystem::path& p)
 {
-    // Accept "song.mod" / "song.MOD" and Amiga-style "mod.SongName"
     auto name = p.filename().string();
     std::string lo = name;
     std::transform(lo.begin(), lo.end(), lo.begin(), ::tolower);
-
     if (lo.size() > 4 && lo.substr(lo.size() - 4) == ".mod") return true;
     if (lo.size() > 4 && lo.substr(0, 4) == "mod.") return true;
     return false;
@@ -48,30 +51,93 @@ static void ScanModFiles()
     } catch (...) {}
 }
 
+// ── Window title ──────────────────────────────────────────────────────────────
+
+static void UpdateWindowTitle(HWND hWnd)
+{
+    const int total = static_cast<int>(g_modPaths.size());
+    const char* bn  = g_activeMixer->BackendName();
+    std::string title = g_activeMixer->SongTitle();
+
+    // BackendName and SongTitle are ASCII-safe; widen naively.
+    std::wstring wbn(bn, bn + strlen(bn));
+    std::wstring wtitle(title.begin(), title.end());
+
+    SetWindowTextW(hWnd, std::format(L"ModPlayer [{}/{}] [{}] — {}",
+        g_modIndex + 1, total, wbn, wtitle).c_str());
+}
+
+// ── Load mod at index ─────────────────────────────────────────────────────────
+
 static void LoadModAtIndex(HWND hWnd)
 {
     if (g_modPaths.empty()) return;
     const int total = static_cast<int>(g_modPaths.size());
 
-    // Try up to 'total' files starting at g_modIndex, skipping any that fail
-    // the magic-word check inside LoadMod (8-ch, MED, XM, etc.).
     for (int tries = 0; tries < total; ++tries) {
-        ModFile newMod;
-        if (LoadMod(g_modPaths[g_modIndex].string(), newMod)) {
-            std::lock_guard<std::mutex> lk(g_audio.GetMutex());
-            g_mod = std::move(newMod);
-            g_mixer.Init(g_mod, kAudioSampleRate);
+        const std::string path = g_modPaths[g_modIndex].string();
 
-            std::wstring title = std::format(L"ModPlayer [{}/{}] — {}",
-                g_modIndex + 1, total,
-                std::wstring(g_mod.songName, g_mod.songName + strlen(g_mod.songName)));
-            SetWindowTextW(hWnd, title.c_str());
-            return;
+        if (g_activeMixer == &g_nativeMixer) {
+            // Native: only 4-channel ProTracker MODs.
+            // File I/O happens outside the lock; Init() inside.
+            ModFile newMod;
+            if (LoadMod(path, newMod)) {
+                std::lock_guard<std::mutex> lk(g_audio.GetMutex());
+                g_mod = std::move(newMod);
+                g_nativeMixer.Init(g_mod, kAudioSampleRate);
+                UpdateWindowTitle(hWnd);
+                return;
+            }
+        } else {
+            // libopenmpt: accepts any format it understands.
+            // Also parse natively (best-effort) so backend switching works.
+            ModFile newMod;
+            const bool nativeOk = LoadMod(path, newMod);
+            bool loaded = false;
+            {
+                std::lock_guard<std::mutex> lk(g_audio.GetMutex());
+                loaded = g_omptMixer.Load(path, kAudioSampleRate);
+                if (loaded && nativeOk)
+                    g_mod = std::move(newMod);
+            }
+            if (loaded) {
+                UpdateWindowTitle(hWnd);
+                return;
+            }
         }
-        // Not a supported format — advance to next
         g_modIndex = (g_modIndex + 1) % total;
     }
 }
+
+// ── Backend switching ─────────────────────────────────────────────────────────
+
+static void SwitchBackend(HWND hWnd)
+{
+    if (g_modPaths.empty()) return;
+    const std::string path = g_modPaths[g_modIndex].string();
+
+    if (g_activeMixer == &g_nativeMixer) {
+        // Switch to libopenmpt
+        bool ok = false;
+        {
+            std::lock_guard<std::mutex> lk(g_audio.GetMutex());
+            ok = g_omptMixer.Load(path, kAudioSampleRate);
+            if (ok) g_activeMixer = &g_omptMixer;
+        }
+        if (ok) g_audio.SetMixer(&g_omptMixer);
+    } else {
+        // Switch back to native
+        {
+            std::lock_guard<std::mutex> lk(g_audio.GetMutex());
+            g_nativeMixer.Init(g_mod, kAudioSampleRate);
+            g_activeMixer = &g_nativeMixer;
+        }
+        g_audio.SetMixer(&g_nativeMixer);
+    }
+    UpdateWindowTitle(hWnd);
+}
+
+// ── Win32 boilerplate ─────────────────────────────────────────────────────────
 
 ATOM             MyRegisterClass(HINSTANCE hInstance);
 BOOL             InitInstance(HINSTANCE, int);
@@ -92,7 +158,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         return 1;
     }
 
-    // Find the first supported 4-channel file
+    // Find first supported 4-channel file for the native backend startup.
     {
         const int total = static_cast<int>(g_modPaths.size());
         bool found = false;
@@ -110,9 +176,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
     }
 
-    g_mixer.Init(g_mod, kAudioSampleRate);
+    g_activeMixer = &g_nativeMixer;
+    g_nativeMixer.Init(g_mod, kAudioSampleRate);
 
-    if (!g_audio.Open(&g_mixer)) {
+    if (!g_audio.Open(&g_nativeMixer)) {
         MessageBoxA(nullptr, "waveOutOpen failed", "AudioOut error", MB_ICONERROR);
         return 1;
     }
@@ -158,18 +225,14 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
     hInst = hInstance;
 
-    // Show song name in the title bar
-    std::wstring title = std::format(L"ModPlayer [{}/{}] — {}",
-        g_modIndex + 1, static_cast<int>(g_modPaths.size()),
-        std::wstring(g_mod.songName, g_mod.songName + strlen(g_mod.songName)));
-
-    HWND hWnd = CreateWindowW(szWindowClass, title.c_str(), WS_OVERLAPPEDWINDOW,
+    HWND hWnd = CreateWindowW(szWindowClass, L"ModPlayer", WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, 0, 488, 340, nullptr, nullptr, hInstance, nullptr);
 
     if (!hWnd) return FALSE;
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
+    UpdateWindowTitle(hWnd);
     SetTimer(hWnd, 1, 33, nullptr);  // ~30 fps repaint for visualizer
     return TRUE;
 }
@@ -194,7 +257,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (wParam == VK_SPACE) {
             g_modIndex = (g_modIndex + 1) % static_cast<int>(g_modPaths.size());
             LoadModAtIndex(hWnd);
+        } else if (wParam == 'B') {
+            SwitchBackend(hWnd);
         }
+        break;
+    case WM_TIMER:
+        InvalidateRect(hWnd, nullptr, FALSE);
         break;
     case WM_PAINT: {
         PAINTSTRUCT ps;
@@ -216,22 +284,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         DeleteObject(bgBrush);
 
         // Layout
-        const int panelW = W / MOD_CHANNELS;
+        const int panelW = W / IMixer::kVisChannels;
         const int labelH = 22;
         const int peakH  = 14;
         const int scopeH = H - labelH - peakH - 4;
 
-        // L=blue, R=green
-        static const COLORREF kChColor[MOD_CHANNELS] = {
+        // L=blue, R=green (Amiga hard-pan: L R R L)
+        static const COLORREF kChColor[IMixer::kVisChannels] = {
             RGB(64, 148, 255), RGB(64, 220, 128),
             RGB(64, 220, 128), RGB(64, 148, 255),
         };
-        static const char* kChSide[MOD_CHANNELS] = { "L", "R", "R", "L" };
+        static const char* kChSide[IMixer::kVisChannels] = { "L", "R", "R", "L" };
 
-        for (int c = 0; c < MOD_CHANNELS; ++c) {
-            const auto& cv  = g_mixer.vis[c];
-            const COLORREF  col = kChColor[c];
-            const int x0 = c * panelW;
+        for (int c = 0; c < IMixer::kVisChannels; ++c) {
+            const auto&    cv  = g_activeMixer->vis[c];
+            const COLORREF col = kChColor[c];
+            const int      x0  = c * panelW;
 
             // Panel divider
             HPEN divPen = CreatePen(PS_SOLID, 1, RGB(45, 45, 58));
@@ -241,12 +309,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             SelectObject(hdc, oldPen);
             DeleteObject(divPen);
 
-            // Label
+            // Label: "CH1 L  C-3  v64" (period only meaningful for native)
             int noteIdx = cv.active ? PeriodToNoteIndex(cv.period, 0) : -1;
-            char label[40];
-            if (cv.active)
+            char label[48];
+            if (cv.active && cv.period > 0)
                 sprintf_s(label, "CH%d %s  %s  v%d", c + 1, kChSide[c],
                           NoteName(noteIdx), static_cast<int>(cv.vol));
+            else if (cv.active)
+                sprintf_s(label, "CH%d %s  v%d", c + 1, kChSide[c],
+                          static_cast<int>(cv.vol));
             else
                 sprintf_s(label, "CH%d %s", c + 1, kChSide[c]);
             SetBkMode(hdc, TRANSPARENT);
@@ -276,7 +347,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 oldPen = static_cast<HPEN>(SelectObject(hdc, wavePen));
 
                 std::vector<POINT> poly(static_cast<size_t>(pts));
-                constexpr int kLen = ModMixer::kScopeLen;
+                constexpr int kLen = IMixer::kScopeLen;
                 for (int x = 0; x < pts; ++x) {
                     int idx = (cv.scopePos + x * kLen / pts) & (kLen - 1);
                     float samp = cv.scope[idx];
@@ -314,9 +385,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         EndPaint(hWnd, &ps);
         break;
     }
-    case WM_TIMER:
-        InvalidateRect(hWnd, nullptr, FALSE);
-        break;
     case WM_DESTROY:
         KillTimer(hWnd, 1);
         PostQuitMessage(0);

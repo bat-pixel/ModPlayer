@@ -1,16 +1,13 @@
 #pragma once
 #include "IMixer.h"
+#include <libopenmpt/libopenmpt.hpp>
 #include <memory>
 #include <string>
-
-namespace openmpt { class module; }
 
 // Playback backend backed by libopenmpt.
 // Supports all formats libopenmpt handles (MOD, XM, S3M, IT, …).
 class LibOpenMptMixer : public IMixer {
 public:
-    ~LibOpenMptMixer() override;
-
     // Load a module from a file path. Returns false if the format is not supported.
     // Safe to call while NOT on the audio thread (caller must hold the audio mutex).
     bool Load(const std::string& path, int sampleRate = 44100);

@@ -1,12 +1,9 @@
 #include "framework.h"
 #include "LibOpenMptMixer.h"
-#include <libopenmpt/libopenmpt.hpp>
 #include <fstream>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-
-LibOpenMptMixer::~LibOpenMptMixer() { Unload(); }
 
 bool LibOpenMptMixer::Load(const std::string& path, int sampleRate)
 {

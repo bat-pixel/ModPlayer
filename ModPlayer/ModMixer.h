@@ -41,6 +41,19 @@ private:
         uint8_t  vibSpeed = 0;
         uint8_t  vibDepth = 0;
         uint8_t  vibPhase = 0;
+        // bits 0-1: 0=sine 1=ramp-down 2=square 3=random; bit2=no phase retrigger
+        uint8_t  vibWave  = 0;
+
+        // Tremolo state (effect 7xx)
+        uint8_t  tremSpeed = 0;
+        uint8_t  tremDepth = 0;
+        uint8_t  tremPhase = 0;
+        uint8_t  tremWave  = 0;
+        int8_t   tremVol   = 0;   // per-tick volume offset applied in Mix()
+
+        // Note delay (effect EDx)
+        uint8_t  delayTick = 0;   // 0 = none; else tick# to trigger on
+        Note     delayNote = {};
     };
 
     void UpdateSamplesPerTick();

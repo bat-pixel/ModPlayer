@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstring>
 
-// Standard ProTracker vibrato sine table (64 entries, range -255..255)
+// Standard ProTracker vibrato/tremolo sine table (64 entries, range -255..255)
 static constexpr int kVibSine[64] = {
       0,  24,  49,  74,  97, 120, 141, 161,
     180, 197, 212, 224, 235, 244, 250, 253,
@@ -15,6 +15,18 @@ static constexpr int kVibSine[64] = {
    -255,-253,-250,-244,-235,-224,-212,-197,
    -180,-161,-141,-120, -97, -74, -49, -24,
 };
+
+// Waveform lookup for vibrato/tremolo: 0=sine, 1=ramp-down, 2=square, 3=random
+static int WaveValue(uint8_t wave, uint8_t phase)
+{
+    phase &= 63;
+    switch (wave & 3) {
+    case 0: return kVibSine[phase];
+    case 1: return 255 - (phase * 8);
+    case 2: return (phase < 32) ? 255 : -255;
+    default: return (std::rand() & 0x1FF) - 255;
+    }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -119,7 +131,7 @@ void ModMixer::Mix(float* stereo, int numFrames)
                 s1 = (p0 + 1 < pcm.size()) ? pcm[p0 + 1] / 128.f : s0;
             }
             const float s = s0 + (s1 - s0) * frc;
-            const float v = ch.vol / 64.f;
+            const float v = std::clamp(static_cast<int>(ch.vol) + ch.tremVol, 0, 64) / 64.f;
 
             L += s * v * kPanL[c];
             R += s * v * kPanR[c];
@@ -146,8 +158,8 @@ void ModMixer::Mix(float* stereo, int numFrames)
             }
         }
 
-        // Amiga-style one-pole low-pass (~3.3 kHz at 44100 Hz)
-        static constexpr float kLpAlpha = 0.37f;
+        // Amiga-style one-pole low-pass (~4.7 kHz at 44100 Hz, always-on RC filter)
+        static constexpr float kLpAlpha = 0.49f;
         lpL_ += kLpAlpha * (L * 0.5f - lpL_);
         lpR_ += kLpAlpha * (R * 0.5f - lpR_);
         stereo[i * 2]     = lpL_;
@@ -200,8 +212,21 @@ void ModMixer::ProcessRow()
     const int pat = mod_->orderTable[order_];
     if (pat >= static_cast<int>(mod_->patterns.size())) return;
 
-    for (int c = 0; c < MOD_CHANNELS; ++c)
-        TriggerNote(c, mod_->patterns[pat][row_][c]);
+    for (int c = 0; c < MOD_CHANNELS; ++c) {
+        ch_[c].tremVol = 0;  // tremolo doesn't apply on tick 0
+        const Note& n = mod_->patterns[pat][row_][c];
+
+        // EDx: delay note trigger until tick x; apply instrument volume now
+        if (n.effect == 0xE && (n.param >> 4) == 0xD && (n.param & 0xF) > 0) {
+            if (n.sample > 0 && n.sample <= MOD_SAMPLES)
+                ch_[c].vol = mod_->samples[n.sample - 1].volume;
+            ch_[c].delayTick = n.param & 0xF;
+            ch_[c].delayNote = n;
+        } else {
+            ch_[c].delayTick = 0;
+            TriggerNote(c, n);
+        }
+    }
 }
 
 // ── TriggerNote ───────────────────────────────────────────────────────────────
@@ -232,7 +257,8 @@ void ModMixer::TriggerNote(int c, const Note& n)
         ch.period = adjPeriod;
         ch.step   = StepForPeriod(adjPeriod, rate_);
         ch.pos    = 0.0;
-        ch.vibPhase = 0;    // reset vibrato phase on new note
+        if (!(ch.vibWave  & 4)) ch.vibPhase  = 0;
+        if (!(ch.tremWave & 4)) ch.tremPhase = 0;
     }
 
     // Row-0 effect side-effects
@@ -247,7 +273,11 @@ void ModMixer::TriggerNote(int c, const Note& n)
         if (n.param >> 4)   ch.vibSpeed = n.param >> 4;
         if (n.param & 0x0F) ch.vibDepth = n.param & 0x0F;
         break;
-    case 0x5:   // Portamento to note + Volume Slide — portaTarget handled above; param is vol slide
+    case 0x5:   // Portamento to note + Volume Slide
+        break;
+    case 0x7:   // Tremolo — (re)configure speed/depth
+        if (n.param >> 4)   ch.tremSpeed = n.param >> 4;
+        if (n.param & 0x0F) ch.tremDepth = n.param & 0x0F;
         break;
     case 0x9:   // Sample Offset — reposition within the just-triggered sample
         if (n.period > 0) {     // only meaningful when a note triggered
@@ -275,11 +305,40 @@ void ModMixer::TriggerNote(int c, const Note& n)
         breakToRow_ = true;
         breakRow_   = std::min((n.param >> 4) * 10 + (n.param & 0xF), 63);
         break;
-    case 0xE: { // Extended effects
+    case 0xE: { // Extended effects (tick-0 subset)
         const uint8_t sub = n.param >> 4;
         const uint8_t val = n.param & 0x0F;
-        if (sub == 0xC) {   // ECx: Note Cut — silence after val ticks (handled per-tick)
-            (void)val;      // stored in param, re-read in ApplyTickEffects
+        switch (sub) {
+        case 0x1: // E1x: Fine portamento up
+            if (ch.period > 0) {
+                ch.period = static_cast<uint16_t>(
+                    std::max(113, static_cast<int>(ch.period) - val));
+                ch.step = StepForPeriod(ch.period, rate_);
+            }
+            break;
+        case 0x2: // E2x: Fine portamento down
+            if (ch.period > 0) {
+                ch.period = static_cast<uint16_t>(
+                    std::min(856, static_cast<int>(ch.period) + val));
+                ch.step = StepForPeriod(ch.period, rate_);
+            }
+            break;
+        case 0x4: // E4x: Set vibrato waveform
+            ch.vibWave = val;
+            break;
+        case 0x7: // E7x: Set tremolo waveform
+            ch.tremWave = val;
+            break;
+        case 0xA: // EAx: Fine volume slide up
+            ch.vol = static_cast<uint8_t>(std::min(64, static_cast<int>(ch.vol) + val));
+            break;
+        case 0xB: // EBx: Fine volume slide down
+            ch.vol = static_cast<uint8_t>(std::max(0, static_cast<int>(ch.vol) - val));
+            break;
+        case 0xC: // ECx: Note Cut — fires per-tick in ApplyTickEffects
+        case 0xD: // EDx: Note Delay — handled in ProcessRow; TriggerNote is a no-op here
+        default:
+            break;
         }
         break;
     }
@@ -298,7 +357,37 @@ void ModMixer::ApplyTickEffects()
         Channel&    ch = ch_[c];
         const Note& n  = mod_->patterns[pat][row_][c];
 
+        // EDx: fire delayed note trigger
+        if (ch.delayTick > 0 && tick_ == static_cast<int>(ch.delayTick)) {
+            ch.delayTick = 0;
+            TriggerNote(c, ch.delayNote);  // EDx sub-case in TriggerNote is a no-op
+            continue;
+        }
+
         switch (n.effect) {
+        case 0x0:   // Arpeggio (0xy: cycle base / +x / +y semitones)
+            if (n.param != 0 && ch.period > 0) {
+                const int x = n.param >> 4;
+                const int y = n.param & 0xF;
+                const int t = tick_ % 3;
+                const int semis = (t == 1) ? x : (t == 2) ? y : 0;
+                if (semis == 0) {
+                    ch.step = StepForPeriod(ch.period, rate_);
+                } else {
+                    int ftRaw = 0;
+                    if (ch.sampleIdx >= 0) {
+                        const int8_t ft = mod_->samples[ch.sampleIdx].finetune;
+                        ftRaw = (ft >= 0) ? static_cast<int>(ft) : static_cast<int>(ft) + 16;
+                    }
+                    const int ni = PeriodToNoteIndex(ch.period, ftRaw);
+                    if (ni >= 0) {
+                        const int ni2 = std::clamp(ni + semis, 0, 35);
+                        ch.step = StepForPeriod(kPeriodTable[ftRaw & 0xF][ni2], rate_);
+                    }
+                }
+            }
+            break;
+
         case 0x1:   // Portamento Up (lower period = higher pitch)
             if (ch.period > 0) {
                 ch.period = static_cast<uint16_t>(
@@ -343,8 +432,9 @@ void ModMixer::ApplyTickEffects()
         case 0x4:   // Vibrato
         case 0x6: { // Vibrato + Volume Slide
             if (ch.period == 0) break;
+            // Apply at current phase, then advance (ProTracker order)
+            const int vdelta = (WaveValue(ch.vibWave, ch.vibPhase) * ch.vibDepth) / 128;
             ch.vibPhase = (ch.vibPhase + ch.vibSpeed) & 63;
-            const int vdelta = (kVibSine[ch.vibPhase] * ch.vibDepth) / 128;
             const int effP   = std::max(1, std::min(9999,
                                    static_cast<int>(ch.period) + vdelta));
             ch.step = StepForPeriod(static_cast<uint16_t>(effP), rate_);
@@ -357,6 +447,13 @@ void ModMixer::ApplyTickEffects()
                 else if (down > 0)
                     ch.vol = static_cast<uint8_t>(std::max(0,  static_cast<int>(ch.vol) - down));
             }
+            break;
+        }
+
+        case 0x7: { // Tremolo — modulate volume without changing ch.vol
+            const int tdelta = (WaveValue(ch.tremWave, ch.tremPhase) * ch.tremDepth) >> 6;
+            ch.tremPhase = (ch.tremPhase + ch.tremSpeed) & 63;
+            ch.tremVol   = static_cast<int8_t>(std::clamp(tdelta, -64, 63));
             break;
         }
 
@@ -374,8 +471,10 @@ void ModMixer::ApplyTickEffects()
         case 0xE: { // Extended effects (per-tick subset)
             const uint8_t sub = n.param >> 4;
             const uint8_t val = n.param & 0x0F;
-            if (sub == 0xC && tick_ == val)   // ECx: Note Cut at tick x
-                ch.vol = 0;
+            if (sub == 0x9 && val > 0 && (tick_ % val) == 0)
+                ch.pos = 0.0;                              // E9x: Retrigger
+            else if (sub == 0xC && tick_ == static_cast<int>(val))
+                ch.vol = 0;                                // ECx: Note Cut
             break;
         }
         }

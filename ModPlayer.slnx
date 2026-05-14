@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="ModPlayer/ModPlayer.vcxproj" />
+  <Project Path="ModPlayer/ModPlayer.vcxproj" Id="7c947019-9b51-4040-8ed5-714550ebe485" />
 </Solution>

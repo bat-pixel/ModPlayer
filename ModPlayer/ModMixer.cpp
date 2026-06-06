@@ -92,6 +92,7 @@ void ModMixer::Init(const ModFile& mod, int sampleRate)
     rowTriggered_ = false;
     playing_     = true;
     lpL_ = lpR_  = 0.f;
+    ledFilter_   = true;
     vis          = {};
     UpdateSamplesPerTick();
     sampleCountdown_ = 0;   // fire ProcessTick immediately on the first Mix() call
@@ -173,10 +174,12 @@ void ModMixer::Mix(float* stereo, int numFrames)
             }
         }
 
-        // Amiga-style one-pole low-pass (~4.7 kHz at 44100 Hz, always-on RC filter)
-        static constexpr float kLpAlpha = 0.49f;
-        lpL_ += kLpAlpha * (L * 0.5f - lpL_);
-        lpR_ += kLpAlpha * (R * 0.5f - lpR_);
+        // Amiga RC filter (always-on ~4.7 kHz) + optional LED filter (~3.3 kHz)
+        static constexpr float kLpAlpha  = 0.49f;  // A500 RC filter
+        static constexpr float kLedAlpha = 0.36f;  // LED filter
+        const float alpha = ledFilter_ ? kLedAlpha : kLpAlpha;
+        lpL_ += alpha * (L * 0.5f - lpL_);
+        lpR_ += alpha * (R * 0.5f - lpR_);
         stereo[i * 2]     = lpL_;
         stereo[i * 2 + 1] = lpR_;
     }
@@ -355,6 +358,9 @@ void ModMixer::TriggerNote(int c, const Note& n)
         const uint8_t sub = n.param >> 4;
         const uint8_t val = n.param & 0x0F;
         switch (sub) {
+        case 0x0: // E0x: LED filter on (E01) / off (E00)
+            ledFilter_ = (val != 0);
+            break;
         case 0x1: // E1x: Fine portamento up
             if (ch.period > 0) {
                 ch.period = static_cast<uint16_t>(
@@ -397,6 +403,10 @@ void ModMixer::TriggerNote(int c, const Note& n)
             break;
         case 0x7: // E7x: Set tremolo waveform
             ch.tremWave = val;
+            break;
+        case 0x8: // E8x: Set panning (0=full-L, 8=centre, F=full-R)
+            ch.panL = (15 - val) / 15.f;
+            ch.panR = val / 15.f;
             break;
         case 0xA: // EAx: Fine volume slide up
             ch.vol = static_cast<uint8_t>(std::min(64, static_cast<int>(ch.vol) + val));

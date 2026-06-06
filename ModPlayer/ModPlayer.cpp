@@ -42,6 +42,7 @@ static std::vector<BrowserItem> g_browserItems;
 static HWND g_hBrowser  = nullptr;
 static HWND g_hLog      = nullptr;
 static bool g_showBrowser = true;
+static WNDPROC g_browserOrigProc = nullptr;
 
 // ── Fullscreen ────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,12 @@ static void ScanModFiles()
     } catch (...) {}
 }
 
+// Forward declarations
+static void LogUnimplementedEffects(const ModFile&);
+static void UpdateWindowTitle(HWND);
+static void BrowserPopulate();
+static bool PathsEqual(const fs::path&, const fs::path&);
+
 // ── Browser population ────────────────────────────────────────────────────────
 
 static void BrowserPopulate()
@@ -157,22 +164,65 @@ static void BrowserPopulate()
         SendMessageW(g_hBrowser, LB_ADDSTRING, 0, (LPARAM)name.c_str());
     }
 
-    // Highlight the currently playing file
-    for (int i = 0; i < (int)g_browserItems.size(); ++i) {
-        if (!g_browserItems[i].isDir &&
-            g_modIndex < (int)g_modPaths.size() &&
-            g_browserItems[i].path == g_modPaths[g_modIndex]) {
-            SendMessageW(g_hBrowser, LB_SETCURSEL, i, 0);
-            break;
+    // Highlight the currently playing file (case-insensitive)
+    if (g_modIndex < (int)g_modPaths.size()) {
+        for (int i = 0; i < (int)g_browserItems.size(); ++i) {
+            if (!g_browserItems[i].isDir &&
+                PathsEqual(g_browserItems[i].path, g_modPaths[g_modIndex])) {
+                SendMessageW(g_hBrowser, LB_SETCURSEL, i, 0);
+                SendMessageW(g_hBrowser, LB_SETTOPINDEX, std::max(0, i - 3), 0);
+                break;
+            }
         }
     }
 }
 
-// Sync g_modIndex to a file path from the browser
+// Case-insensitive path comparison (Windows filesystem is case-insensitive)
+static bool PathsEqual(const fs::path& a, const fs::path& b)
+{
+    std::wstring wa = a.wstring(), wb = b.wstring();
+    std::transform(wa.begin(), wa.end(), wa.begin(), ::towlower);
+    std::transform(wb.begin(), wb.end(), wb.begin(), ::towlower);
+    return wa == wb;
+}
+
 static void SyncModIndexToPath(const fs::path& p)
 {
-    for (int i = 0; i < (int)g_modPaths.size(); ++i) {
-        if (g_modPaths[i] == p) { g_modIndex = i; return; }
+    for (int i = 0; i < (int)g_modPaths.size(); ++i)
+        if (PathsEqual(g_modPaths[i], p)) { g_modIndex = i; return; }
+}
+
+// Play a file directly by path — does not require g_modPaths to contain it.
+static void PlayFileByPath(HWND hWnd, const fs::path& filePath)
+{
+    SyncModIndexToPath(filePath);   // update g_modIndex if found (best-effort)
+    const std::string spath = filePath.string();
+    g_audio.SetPaused(false);
+
+    if (g_activeMixer == &g_omptMixer) {
+        ModFile newMod;
+        const bool nok = LoadMod(spath, newMod);
+        bool loaded = false;
+        {
+            std::lock_guard<std::mutex> lk(g_audio.GetMutex());
+            loaded = g_omptMixer.Load(spath, kAudioSampleRate);
+            if (loaded && nok) g_mod = std::move(newMod);
+        }
+        if (loaded) {
+            if (nok) LogUnimplementedEffects(g_mod);
+            UpdateWindowTitle(hWnd);
+            BrowserPopulate();
+        }
+    } else {
+        ModFile newMod;
+        if (LoadMod(spath, newMod)) {
+            std::lock_guard<std::mutex> lk(g_audio.GetMutex());
+            g_mod = std::move(newMod);
+            g_nativeMixer.Init(g_mod, kAudioSampleRate);
+            LogUnimplementedEffects(g_mod);
+            UpdateWindowTitle(hWnd);
+            BrowserPopulate();
+        }
     }
 }
 
@@ -320,35 +370,86 @@ static void ToggleFullscreen(HWND hWnd)
 }
 
 // ── Amiga effects ─────────────────────────────────────────────────────────────
+// Music sync helpers — called every paint tick (33 ms).
+// We use ch.vol (0-64, updated by the mixer per-tick) which is far more
+// reactive than cv.peak (which is a slow-decay max). We also compute an
+// instant RMS from the scope ring buffer for amplitude-based sync.
+
+static float ScopeRms(const IMixer::ChannelVis& cv)
+{
+    double s = 0.0;
+    for (float v : cv.scope) s += v * v;
+    return (float)sqrt(s / IMixer::kScopeLen);
+}
+
+// Combined stereo energy [0..1] from instant scope RMS
+static float MusicEnergy()
+{
+    float e = 0.f;
+    for (int c = 0; c < IMixer::kVisChannels; ++c)
+        e += ScopeRms(g_activeMixer->vis[c]);
+    return std::min(1.f, e);
+}
+
+// Per-channel normalised volume from cv.vol (0-64 → 0-1)
+static float ChVol(int c)
+{
+    return g_activeMixer->vis[c].vol / 64.f;
+}
+
+static int  g_prevRow   = -1;   // detect row changes for beat flash
+static float g_beatFlash = 0.f; // decays per frame [0..1]
+
+static void UpdateBeatFlash()
+{
+    int row = g_activeMixer->CurrentRow();
+    if (row != g_prevRow) {
+        g_beatFlash = 1.f;
+        g_prevRow   = row;
+    }
+    g_beatFlash = std::max(0.f, g_beatFlash - 0.12f);
+}
 
 static void DrawEffects(HDC hdc, int x0, int y0, int W, int H, int tick)
 {
-    // Channel peak values [0-1]
-    float peaks[4]{};
-    for (int c = 0; c < 4; ++c) peaks[c] = g_activeMixer->vis[c].peak;
+    UpdateBeatFlash();
+
+    const float energy = MusicEnergy();                  // instant loudness 0-1
+    const float beat   = g_beatFlash;                    // 1 on new row, decays
+    const float ch0    = ChVol(0), ch1 = ChVol(1);
+    const float ch2    = ChVol(2), ch3 = ChVol(3);
+    const float lVol   = (ch0 + ch3) * 0.5f;            // left channels avg
+    const float rVol   = (ch1 + ch2) * 0.5f;            // right channels avg
 
     switch (g_effectMode) {
 
-    case 1: { // ── Raster bars ──
+    case 1: { // ── Raster bars — beat-synced heights, volume-driven width ──
         const int nBars = 7;
         static const COLORREF kPal[] = {
             RGB(255,0,80), RGB(255,100,0), RGB(255,220,0),
             RGB(0,255,120), RGB(0,160,255), RGB(160,0,255), RGB(255,0,200)
         };
+        // Beat flash: brighten all bars on new row
+        float brightness = 0.6f + beat * 0.4f;
+
         for (int b = 0; b < nBars; ++b) {
-            float phase = (tick * 0.03f) + b * 0.9f;
-            int cy = y0 + H / 2 + (int)(sinf(phase) * H * 0.35f
-                          + sinf(phase * 0.7f + b) * H * 0.15f);
-            int bh = 16 + (int)(sinf(phase * 1.3f) * 8.f);
-            // Glow: draw 3 rects with decreasing alpha simulation
-            for (int g = 3; g >= 0; --g) {
-                COLORREF c2 = kPal[b % nBars];
-                int r = (GetRValue(c2) * (4-g)) / 4;
-                int gv= (GetGValue(c2) * (4-g)) / 4;
-                int bv= (GetBValue(c2) * (4-g)) / 4;
-                HBRUSH br = CreateSolidBrush(RGB(r,gv,bv));
-                RECT rr = { x0, cy - bh/2 - g*4, x0+W, cy + bh/2 + g*4 };
-                rr.top    = std::clamp((long)rr.top, (long)y0, (long)(y0+H));
+            // Bar position: sine wave driven by tick, amplitude scaled by channel vol
+            float chScale = (b < 3) ? lVol : rVol;
+            float phase = tick * 0.025f + b * 0.95f;
+            int cy = y0 + H/2 + (int)((sinf(phase) * 0.35f + sinf(phase*0.61f+b)*0.15f)
+                                       * H * (0.4f + chScale * 0.6f));
+            // Bar height grows with energy
+            int bh = (int)((14 + energy * 20.f + beat * 18.f));
+
+            COLORREF c2 = kPal[b % nBars];
+            for (int g2 = 3; g2 >= 0; --g2) {
+                float a = brightness * (4 - g2) / 4.f;
+                int r  = (int)(GetRValue(c2) * a);
+                int gv = (int)(GetGValue(c2) * a);
+                int bv = (int)(GetBValue(c2) * a);
+                HBRUSH br = CreateSolidBrush(RGB(r, gv, bv));
+                RECT rr = { x0, cy - bh/2 - g2*5, x0+W, cy + bh/2 + g2*5 };
+                rr.top    = std::clamp((long)rr.top,    (long)y0, (long)(y0+H));
                 rr.bottom = std::clamp((long)rr.bottom, (long)y0, (long)(y0+H));
                 FillRect(hdc, &rr, br);
                 DeleteObject(br);
@@ -357,27 +458,36 @@ static void DrawEffects(HDC hdc, int x0, int y0, int W, int H, int tick)
         break;
     }
 
-    case 2: { // ── Starfield ──
-        // Init stars
+    case 2: { // ── Starfield — speed and density driven by volume ──
         if (g_stars.empty()) {
-            g_stars.resize(200);
+            g_stars.resize(250);
             for (auto& s : g_stars) {
-                s.x = ((rand()%1000)-500) / 10.f;
-                s.y = ((rand()%1000)-500) / 10.f;
+                s.x = ((rand()%2000)-1000) / 10.f;
+                s.y = ((rand()%2000)-1000) / 10.f;
                 s.z = (float)(rand()%100+1);
             }
         }
-        float cx = x0 + W/2.f, cy2 = y0 + H/2.f;
-        float speed = 0.5f + peaks[0] + peaks[1];
+        float cx  = x0 + W/2.f;
+        float cy2 = y0 + H/2.f;
+        // Speed reacts to combined volume, beat adds a warp pulse
+        float speed = 0.3f + energy * 2.5f + beat * 4.f;
         for (auto& s : g_stars) {
             s.z -= speed;
-            if (s.z <= 0.f) { s.x = ((rand()%1000)-500)/10.f; s.y = ((rand()%1000)-500)/10.f; s.z = 100.f; }
+            if (s.z <= 0.f) {
+                s.x = ((rand()%2000)-1000)/10.f;
+                s.y = ((rand()%2000)-1000)/10.f;
+                s.z = 100.f;
+            }
             float sx = s.x / s.z * (W/2.f) + cx;
             float sy = s.y / s.z * (H/2.f) + cy2;
-            if (sx < x0||sx>=x0+W||sy<y0||sy>=y0+H) continue;
-            int bright = (int)((1.f - s.z/100.f) * 255.f);
-            int sz = std::max(1, (int)((1.f - s.z/100.f) * 3.f));
-            HBRUSH br = CreateSolidBrush(RGB(bright,bright,bright));
+            if (sx < x0||sx >= x0+W||sy < y0||sy >= y0+H) continue;
+            float depth = 1.f - s.z/100.f;
+            int bright  = (int)(depth * 255.f);
+            int sz      = std::max(1, (int)(depth * 3.f));
+            // Tint stars by left/right channel volume
+            int r  = std::min(255, (int)(bright * (1.f + lVol)));
+            int bv = std::min(255, (int)(bright * (1.f + rVol)));
+            HBRUSH br = CreateSolidBrush(RGB(r, bright, bv));
             RECT rr = {(LONG)(sx-sz),(LONG)(sy-sz),(LONG)(sx+sz),(LONG)(sy+sz)};
             FillRect(hdc, &rr, br);
             DeleteObject(br);
@@ -385,25 +495,24 @@ static void DrawEffects(HDC hdc, int x0, int y0, int W, int H, int tick)
         break;
     }
 
-    case 3: { // ── Plasma (scanline-based) ──
-        // Draw horizontal lines with colour from sine mix
-        float t = tick * 0.05f;
-        float vol = (peaks[0]+peaks[1]+peaks[2]+peaks[3]) * 0.25f;
-        int step = std::max(1, H/80);
+    case 3: { // ── Plasma — intensity and speed driven by music ──
+        // Speed scales with energy; beat boosts it momentarily
+        float t    = tick * (0.03f + energy * 0.05f) + beat * 0.8f;
+        float amp  = 0.3f + energy * 0.7f;           // colour saturation
+        int step   = std::max(1, H/80);
         for (int y = y0; y < y0+H; y += step) {
             float fy = (float)(y - y0 - H/2) / H;
-            float v  = sinf(fy * 6.f + t) + sinf(fy * 3.7f - t*1.3f)
-                     + sinf((fy + t*0.5f) * 5.f)
-                     + sinf(sqrtf(fy*fy + 0.1f) * 8.f + t);
-            v = (v + 4.f) / 8.f; // 0-1
-            int r = (int)(sinf(v * 3.14159f        ) * 127.f + 128.f);
-            int g = (int)(sinf(v * 3.14159f + 2.09f) * 127.f + 128.f);
-            int bv= (int)(sinf(v * 3.14159f + 4.19f) * 127.f + 128.f);
-            // Amplify with music volume
-            r = std::min(255, (int)(r * (0.5f + vol)));
-            g = std::min(255, (int)(g * (0.5f + vol)));
-            bv= std::min(255, (int)(bv* (0.5f + vol)));
-            HBRUSH br = CreateSolidBrush(RGB(r,g,bv));
+            // Two channels independently modulate the two sine frequencies
+            float v = sinf(fy * (4.f + lVol * 4.f) + t)
+                    + sinf(fy * (2.5f + rVol * 3.f) - t*1.2f)
+                    + sinf((fy + t*0.4f) * 5.f)
+                    + sinf(sqrtf(fy*fy + 0.05f) * 8.f + t * 1.3f);
+            v = (v/4.f + 1.f) * 0.5f;  // 0-1
+            int r  = (int)(sinf(v*3.14159f)         * 127.f * amp + 128.f * amp);
+            int g2 = (int)(sinf(v*3.14159f + 2.09f) * 127.f * amp + 128.f * amp);
+            int bv = (int)(sinf(v*3.14159f + 4.19f) * 127.f * amp + 128.f * amp);
+            HBRUSH br = CreateSolidBrush(RGB(
+                std::clamp(r,0,255), std::clamp(g2,0,255), std::clamp(bv,0,255)));
             RECT rr = { x0, y, x0+W, y+step };
             FillRect(hdc, &rr, br);
             DeleteObject(br);
@@ -411,47 +520,57 @@ static void DrawEffects(HDC hdc, int x0, int y0, int W, int H, int tick)
         break;
     }
 
-    case 4: { // ── Copper scroller ──
+    case 4: { // ── Copper scroller — scroll speed and wave from music ──
         static const wchar_t kMsg[] =
             L"    * MODPLAYER * AMIGA DEMOSCENE RULES * GREETS TO ALL SCENERS *"
-            L"    PRESS 1-5 FOR EFFECTS, F FOR FULLSCREEN, B TO TOGGLE BACKEND *    ";
+            L"    PRESS 1-5 FOR EFFECTS   F=FULLSCREEN   B=BACKEND   T=BROWSER    ";
         static const int kMsgLen = (int)(sizeof(kMsg)/sizeof(wchar_t)) - 1;
 
-        // Copper bars background
+        // Copper gradient background — hue shifts with left channel volume
         for (int y = y0; y < y0+H; y += 2) {
             float fy = (float)(y-y0)/H;
-            int r = (int)(sinf(fy*3.14f+tick*0.03f)*60.f+20.f);
-            int bv= (int)(sinf(fy*3.14f*2.f-tick*0.05f)*80.f+40.f);
-            HBRUSH br = CreateSolidBrush(RGB(std::clamp(r,0,255),0,std::clamp(bv,0,255)));
-            RECT rr={x0,y,x0+W,y+2};
-            FillRect(hdc,&rr,br);
-            DeleteObject(br);
+            float phase = fy*3.14f + tick*0.025f;
+            int r  = (int)(sinf(phase + lVol*2.f)*60.f + 20.f);
+            int bv = (int)(sinf(phase*1.7f + rVol*2.f)*80.f + 40.f);
+            HBRUSH br = CreateSolidBrush(RGB(
+                std::clamp(r,0,255), (int)(beat*40.f), std::clamp(bv,0,255)));
+            RECT rr = {x0,y,x0+W,y+2};
+            FillRect(hdc,&rr,br); DeleteObject(br);
         }
 
-        // Sine-wave scrolling text
+        // Scroll speed: base + energy boost
+        int scrollSpeed = (int)(2.f + energy * 6.f);
+        static int scrollPx = 0;
+        scrollPx += scrollSpeed;
+
         HFONT font = CreateFontW(32,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,DEFAULT_QUALITY,
-            FF_DONTCARE,L"Courier New");
+            FF_DONTCARE, L"Courier New");
         HFONT old = (HFONT)SelectObject(hdc, font);
         SetBkMode(hdc, TRANSPARENT);
 
-        int charW = 18;
-        int scrollX = -(tick * 3) % (kMsgLen * charW);
-        int cy3 = y0 + H/2;
+        const int charW = 20;
+        int startX = -(scrollPx % (kMsgLen * charW));
+        int cy3    = y0 + H/2;
 
         for (int i = 0; i < W/charW + 2; ++i) {
-            int xi = x0 + scrollX + i * charW;
+            int xi = x0 + startX + i * charW;
             if (xi < x0 - charW || xi > x0+W) continue;
-            int ci = ((tick * 3 / charW) + i) % kMsgLen;
-            if (ci < 0) ci += kMsgLen;
-            float angle = (float)(xi - x0) / W * 3.14159f * 2.f + tick*0.04f;
-            int yi = cy3 + (int)(sinf(angle)*H*0.28f) - 16;
 
-            // Colour from position
-            int r2=(int)(sinf(i*0.3f+tick*0.05f)*127+128);
-            int g2=(int)(sinf(i*0.3f+1.f+tick*0.05f)*127+128);
-            SetTextColor(hdc, RGB(r2,g2,220));
-            wchar_t ch[2]={kMsg[ci],0};
+            int ci = (scrollPx/charW + i) % kMsgLen;
+            if (ci < 0) ci += kMsgLen;
+
+            // Sine wave: amplitude scales with left+right volume
+            float wave = lVol * 0.2f + rVol * 0.2f + 0.18f;
+            float angle = (float)(xi - x0) / W * 6.28318f + tick * 0.04f;
+            int yi = cy3 + (int)(sinf(angle) * H * wave) - 16;
+
+            // Rainbow colour + beat brightens it
+            float hue = (float)ci / kMsgLen + tick * 0.01f;
+            int r2  = (int)(sinf(hue*6.28f)*127+128+beat*80.f);
+            int g2  = (int)(sinf(hue*6.28f+2.09f)*127+128+beat*60.f);
+            SetTextColor(hdc, RGB(std::clamp(r2,0,255), std::clamp(g2,0,255), 220));
+            wchar_t ch[2] = {kMsg[ci], 0};
             TextOutW(hdc, xi, yi, ch, 1);
         }
         SelectObject(hdc, old);
@@ -459,39 +578,49 @@ static void DrawEffects(HDC hdc, int x0, int y0, int W, int H, int tick)
         break;
     }
 
-    case 5: { // ── Spectrum bars ──
-        // Use channel peaks and position to drive animated EQ bars
+    case 5: { // ── Spectrum — per-channel vol drives individual bars ──
+        // 32 bars: left channels (0,3) drive the left half, right (1,2) the right
         const int nBars = 32;
-        static float barH[32]{};
-        static float barV[32]{};
-        // Drive bar levels from channel peaks + position oscillation
+        static float barLvl[32]{};
+        static float barPk [32]{};
+
         for (int b = 0; b < nBars; ++b) {
+            // Which channel group drives this bar?
             float f = (float)b / nBars;
-            float target = 0.f;
-            for (int c = 0; c < 4; ++c)
-                target += peaks[c] * powf(sinf(f*3.14f*(c+1) + tick*0.02f*(c+1)), 2.f);
-            target = std::min(1.f, target * 1.5f);
-            barV[b] += (target - barV[b]) * 0.35f;
-            barH[b] = std::max(barH[b] - 0.008f, barV[b]);
+            float chL = ChVol(0) * powf(sinf((1.f-f)*3.14f), 2.f)
+                      + ChVol(3) * powf(sinf((1.f-f)*2.f), 2.f);
+            float chR = ChVol(1) * powf(sinf(f*3.14f), 2.f)
+                      + ChVol(2) * powf(sinf(f*2.f), 2.f);
+            float target = std::min(1.f, (chL + chR) * 1.2f + energy * 0.3f);
+            // Fast attack, slower decay
+            float attack = (target > barLvl[b]) ? 0.6f : 0.12f;
+            barLvl[b] += (target - barLvl[b]) * attack;
+            // Peak hold: drop slowly unless new peak
+            barPk[b] = std::max(barPk[b] - 0.012f, barLvl[b]);
         }
+
         int barW = W / nBars;
         for (int b = 0; b < nBars; ++b) {
-            int bx = x0 + b * barW;
-            int bh2 = (int)(barV[b] * (H - 4));
-            int ph  = (int)(barH[b] * (H - 4));
-            // Bar colour — gradient green→yellow→red
-            float v = barV[b];
-            int r3 = std::min(255,(int)(v*2*255));
-            int g3 = std::min(255,(int)((1.f-v)*2*255));
-            HBRUSH br = CreateSolidBrush(RGB(r3,g3,0));
+            int bx  = x0 + b * barW;
+            int bh2 = (int)(barLvl[b] * (H - 4));
+            int ph  = (int)(barPk[b]  * (H - 4));
+
+            // Colour: gradient green→yellow→red, brightens on beat
+            float v  = barLvl[b];
+            float br = std::min(1.f, v * 2.f + beat * 0.3f);
+            int r3  = std::min(255,(int)(br*255));
+            int g3  = std::min(255,(int)((1.f-std::min(1.f,v*1.5f))*255));
+            HBRUSH fillBr = CreateSolidBrush(RGB(r3,g3,0));
             RECT rr = {bx+1, y0+H-bh2, bx+barW-1, y0+H};
-            FillRect(hdc,&rr,br);
-            DeleteObject(br);
-            // Peak marker
-            HBRUSH pb = CreateSolidBrush(RGB(255,255,255));
-            RECT pr = {bx+1,y0+H-ph-3,bx+barW-1,y0+H-ph};
-            FillRect(hdc,&pr,pb);
-            DeleteObject(pb);
+            FillRect(hdc, &rr, fillBr); DeleteObject(fillBr);
+
+            // Peak marker (white, flashes yellow on beat)
+            if (ph > 2) {
+                int pm = (int)(beat * 200.f);
+                HBRUSH pkBr = CreateSolidBrush(RGB(255, 255-pm, 0));
+                RECT pr = {bx+1, y0+H-ph-3, bx+barW-1, y0+H-ph};
+                FillRect(hdc, &pr, pkBr); DeleteObject(pkBr);
+            }
         }
         break;
     }
@@ -602,6 +731,17 @@ static void LayoutChildren(HWND hWnd)
         SetWindowPos(g_hBrowser, nullptr, vizW, 0, bw, H, SWP_NOZORDER|SWP_NOACTIVATE);
 }
 
+// ListBox subclass: forward Enter/Return to parent as a double-click notification
+static LRESULT CALLBACK BrowserSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (msg == WM_KEYDOWN && wParam == VK_RETURN) {
+        SendMessageW(GetParent(hWnd), WM_COMMAND,
+            MAKEWPARAM(1001, LBN_DBLCLK), (LPARAM)hWnd);
+        return 0;
+    }
+    return CallWindowProc(g_browserOrigProc, hWnd, msg, wParam, lParam);
+}
+
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
     hInst = hInstance;
@@ -627,6 +767,10 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     HFONT lbFont = CreateFontW(14,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,DEFAULT_QUALITY,FF_DONTCARE,L"Consolas");
     SendMessageW(g_hBrowser, WM_SETFONT, (WPARAM)lbFont, TRUE);
+
+    // Subclass the ListBox so Enter triggers play/navigate
+    g_browserOrigProc = (WNDPROC)SetWindowLongPtrW(g_hBrowser, GWLP_WNDPROC,
+        (LONG_PTR)BrowserSubclassProc);
 
     BrowserPopulate();
 
@@ -690,18 +834,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
         } else if (ctrl == IDM_EXIT) {
             DestroyWindow(hWnd);
-        } else if (ctrl == 1001 && HIWORD(wParam) == LBN_DBLCLK) {
-            // Double-click in browser
+        } else if (ctrl == 1001 &&
+                   (HIWORD(wParam) == LBN_DBLCLK || HIWORD(wParam) == LBN_SELCHANGE)) {
             int sel = (int)SendMessageW(g_hBrowser, LB_GETCURSEL, 0, 0);
             if (sel >= 0 && sel < (int)g_browserItems.size()) {
                 auto& item = g_browserItems[sel];
                 if (item.isDir) {
+                    // Navigate into folder on any selection (single-click or double-click)
                     g_browserDir = item.path;
                     BrowserPopulate();
                 } else {
-                    SyncModIndexToPath(item.path);
-                    g_audio.SetPaused(false);
-                    LoadModAtIndex(hWnd);
+                    // Play file immediately on single-click
+                    PlayFileByPath(hWnd, item.path);
                 }
             }
         } else {
@@ -758,16 +902,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case '3': g_effectMode = 3; InvalidateRect(hWnd,nullptr,FALSE); break;
         case '4': g_effectMode = 4; InvalidateRect(hWnd,nullptr,FALSE); break;
         case '5': g_effectMode = 5; InvalidateRect(hWnd,nullptr,FALSE); break;
-        // Browser keyboard: Enter selects current item
-        case VK_RETURN: {
-            int sel = (int)SendMessageW(g_hBrowser, LB_GETCURSEL, 0, 0);
-            if (sel >= 0 && sel < (int)g_browserItems.size()) {
-                auto& item = g_browserItems[sel];
-                if (item.isDir) { g_browserDir = item.path; BrowserPopulate(); }
-                else { SyncModIndexToPath(item.path); g_audio.SetPaused(false); LoadModAtIndex(hWnd); }
-            }
-            break;
-        }
         }
         break;
     }

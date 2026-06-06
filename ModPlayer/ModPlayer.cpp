@@ -631,6 +631,143 @@ static void DrawEffects(HDC hdc, int x0, int y0, int W, int H, int tick)
         break;
     }
 
+    case 6: { // ── Channel circles ──
+        // One circle per channel. Size = scope RMS. Colour hue cycles slowly and
+        // shifts on each note trigger (period change). Active effect (E0x, vibrato,
+        // portamento etc.) is shown as a pulsing halo ring.
+
+        // Per-channel state
+        struct CircleState {
+            float hue    = 0.f;   // current colour hue [0..1]
+            float hueVel = 0.f;   // hue drift per tick
+            uint16_t lastPeriod = 0;
+            float    flash  = 0.f; // note-trigger flash [0..1]
+            float    x = 0.f, y = 0.f;  // current position (drift)
+            float    vx= 0.f, vy= 0.f;  // velocity
+        };
+        static CircleState cs[4]{};
+        static bool csInit = false;
+        if (!csInit) {
+            csInit = true;
+            for (int c = 0; c < 4; ++c) {
+                cs[c].hue = c * 0.25f;
+                cs[c].hueVel = 0.002f + c * 0.0007f;
+            }
+        }
+
+        // Helper: HSV→RGB (h 0-1, s 0-1, v 0-1)
+        auto hsv = [](float h, float s, float v) -> COLORREF {
+            h = h - floorf(h);
+            int hi = (int)(h * 6.f);
+            float f = h*6.f - hi;
+            float p = v*(1-s), q = v*(1-s*f), t = v*(1-s*(1-f));
+            float r,g,b;
+            switch(hi%6){
+            case 0: r=v;g=t;b=p; break; case 1: r=q;g=v;b=p; break;
+            case 2: r=p;g=v;b=t; break; case 3: r=p;g=q;b=v; break;
+            case 4: r=t;g=p;b=v; break; default:r=v;g=p;b=q; break;
+            }
+            return RGB((int)(r*255),(int)(g*255),(int)(b*255));
+        };
+
+        // Helper: filled ellipse via polygon approximation
+        auto fillCircle = [&](HDC dc, int cx, int cy, int rx, int ry, COLORREF col) {
+            if (rx < 1 || ry < 1) return;
+            HBRUSH br = CreateSolidBrush(col);
+            HBRUSH old = (HBRUSH)SelectObject(dc, br);
+            HPEN pn = CreatePen(PS_NULL,0,0);
+            HPEN op = (HPEN)SelectObject(dc, pn);
+            Ellipse(dc, cx-rx, cy-ry, cx+rx, cy+ry);
+            SelectObject(dc, old); DeleteObject(br);
+            SelectObject(dc, op);  DeleteObject(pn);
+        };
+        auto drawRing = [&](HDC dc, int cx, int cy, int r, int thick, COLORREF col) {
+            if (r < 1) return;
+            HPEN pn = CreatePen(PS_SOLID, thick, col);
+            HPEN op = (HPEN)SelectObject(dc, pn);
+            HBRUSH ob = (HBRUSH)SelectObject(dc, GetStockObject(NULL_BRUSH));
+            Ellipse(dc, cx-r, cy-r, cx+r, cy+r);
+            SelectObject(dc, op); DeleteObject(pn);
+            SelectObject(dc, ob);
+        };
+
+        // Quadrant centres for the 4 channels: L1 top-left, R1 top-right,
+        //                                       R2 bottom-right, L2 bottom-left
+        const int qw = W/2, qh = H/2;
+        const int qcx[4] = { qw/2,       qw + qw/2, qw + qw/2, qw/2       };
+        const int qcy[4] = { qh/2,       qh/2,      qh + qh/2, qh + qh/2  };
+
+        for (int c = 0; c < 4; ++c) {
+            const auto& cv  = g_activeMixer->vis[c];
+            CircleState& s  = cs[c];
+
+            float rms  = ScopeRms(cv);
+            float vol  = cv.vol / 64.f;
+
+            // Detect note trigger (period change) → hue jump + flash
+            if (cv.period != s.lastPeriod && cv.period > 0) {
+                s.lastPeriod = cv.period;
+                s.flash = 1.f;
+                // Jump hue based on note pitch (period → hue offset)
+                s.hue += (856.f - (float)cv.period) / 856.f * 0.18f + 0.05f;
+                // Velocity kick toward quadrant centre (organic bounce)
+                s.vx += ((float)(qcx[c] + x0) - (x0 + qcx[c] + s.x)) * 0.03f;
+                s.vy += ((float)(qcy[c] + y0) - (y0 + qcy[c] + s.y)) * 0.03f;
+            }
+            s.flash = std::max(0.f, s.flash - 0.07f);
+            s.hue  += s.hueVel + energy * 0.0015f;
+
+            // Slow drift within quadrant
+            s.vx += (float)(rand()%100-50)*0.0004f;
+            s.vy += (float)(rand()%100-50)*0.0004f;
+            // Soft spring back toward quadrant centre
+            s.vx -= s.x * 0.012f;
+            s.vy -= s.y * 0.012f;
+            s.vx *= 0.92f; s.vy *= 0.92f;
+            s.x  += s.vx;  s.y  += s.vy;
+
+            int cx = x0 + qcx[c] + (int)s.x;
+            int cy = y0 + qcy[c] + (int)s.y;
+
+            // Base radius from RMS (sound energy), min size from volume setting
+            int maxR = std::min(qw, qh) * 2 / 5;
+            int r    = std::max(8, (int)((rms*2.5f + vol*0.3f + beat*0.15f) * maxR));
+            r = std::min(r, maxR);
+
+            // Outer glow (halo) — brighter on note trigger flash
+            float glow = 0.25f + s.flash * 0.5f + beat * 0.15f;
+            for (int g2 = 5; g2 >= 1; --g2) {
+                float a = glow * g2 / 5.f;
+                COLORREF gc = hsv(s.hue, 0.7f, a * 0.6f);
+                fillCircle(hdc, cx, cy, r + g2*7, r + g2*7, gc);
+            }
+
+            // Main circle — full saturation, value from volume
+            float bright = 0.5f + vol * 0.5f + s.flash * 0.3f;
+            COLORREF main_col = hsv(s.hue, 0.9f, std::min(1.f, bright));
+            fillCircle(hdc, cx, cy, r, r, main_col);
+
+            // Inner highlight (lighter centre)
+            COLORREF hi_col = hsv(s.hue + 0.05f, 0.4f, std::min(1.f, bright + 0.3f));
+            fillCircle(hdc, cx, cy, r/3, r/3, hi_col);
+
+            // Trigger ring — expands and fades on note hit
+            if (s.flash > 0.05f) {
+                int ringR = r + (int)((1.f - s.flash) * maxR * 0.6f);
+                COLORREF rc = hsv(s.hue + 0.1f, 0.6f, s.flash * 0.9f);
+                drawRing(hdc, cx, cy, ringR, std::max(1,(int)(s.flash*4)), rc);
+            }
+
+            // Channel label
+            static const wchar_t* kLabel[4] = {L"CH1",L"CH2",L"CH3",L"CH4"};
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, hsv(s.hue, 0.3f, 0.9f));
+            RECT lr={cx-20, cy+r+4, cx+20, cy+r+20};
+            DrawTextW(hdc, kLabel[c], -1, &lr, DT_CENTER|DT_SINGLELINE);
+        }
+        break;
+    }
+
     default: break;
     }
 }
@@ -924,6 +1061,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case '3': g_effectMode = 3; InvalidateRect(hWnd,nullptr,FALSE); break;
         case '4': g_effectMode = 4; InvalidateRect(hWnd,nullptr,FALSE); break;
         case '5': g_effectMode = 5; InvalidateRect(hWnd,nullptr,FALSE); break;
+        case '6': g_effectMode = 6; InvalidateRect(hWnd,nullptr,FALSE); break;
         }
         break;
     }
@@ -1011,7 +1149,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             int ords= g_activeMixer->SongOrders();
             SetTextColor(hdc, RGB(140,140,170));
             char row2[160];
-            sprintf_s(row2,"ORD %d/%d ROW %2d | SPC/\x1a\x1b=prev/next  P=pause  B=backend  F=full  T=browser  1-5=effects",
+            sprintf_s(row2,"ORD %d/%d ROW %2d | SPC/\x1a\x1b=prev/next  P=pause  B=backend  F=full  T=browser  1-6=effects",
                 ord+1,ords,row);
             RECT r2={4,20,vizW-4,38};
             DrawTextA(hdc,row2,-1,&r2,DT_LEFT|DT_VCENTER|DT_SINGLELINE);

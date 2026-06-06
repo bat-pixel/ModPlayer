@@ -1,6 +1,7 @@
 #include "framework.h"
 #include "AudioOut.h"
 #include <algorithm>
+#include <cstring>
 
 // ── FillBuffer ────────────────────────────────────────────────────────────────
 // Asks the mixer for one buffer's worth of float audio, converts to int16.
@@ -20,14 +21,15 @@ void AudioOut::FillBuffer(int idx)
             std::memset(floatBuf, 0, sizeof(floatBuf));
         else
             mixer_->Mix(floatBuf, kAudioBufFrames);
-    }
 
-    int16_t* dst = bufData_[idx];
-    for (int i = 0; i < kAudioBufFrames * kAudioChannels; ++i) {
-        float s = floatBuf[i];
-        if (s >  1.f) s =  1.f;
-        if (s < -1.f) s = -1.f;
-        dst[i] = static_cast<int16_t>(s * 32767.f);
+        int16_t* dst = bufData_[idx];
+        for (int i = 0; i < kAudioBufFrames * kAudioChannels; ++i) {
+            float s = floatBuf[i];
+            if (s >  1.f) s =  1.f;
+            if (s < -1.f) s = -1.f;
+            dst[i] = static_cast<int16_t>(s * 32767.f);
+        }
+        RecordSamples(dst, kAudioBufFrames * kAudioChannels);
     }
 }
 
@@ -64,6 +66,60 @@ DWORD WINAPI AudioOut::FillThread(LPVOID param)
 {
     static_cast<AudioOut*>(param)->FillLoop();
     return 0;
+}
+
+// ── Recording ─────────────────────────────────────────────────────────────────
+
+void AudioOut::StartRecording(const std::string& path)
+{
+    std::lock_guard<std::mutex> lk(fillMtx_);
+    if (recFile_) { fclose(recFile_); recFile_ = nullptr; }
+
+    fopen_s(&recFile_, path.c_str(), "wb");
+    if (!recFile_) return;
+    recBytes_ = 0;
+
+    // Write a placeholder WAV header (44 bytes); finalized in StopRecording.
+    uint8_t hdr[44]{};
+    fwrite(hdr, 1, sizeof(hdr), recFile_);
+}
+
+void AudioOut::StopRecording()
+{
+    std::lock_guard<std::mutex> lk(fillMtx_);
+    if (!recFile_) return;
+
+    // Seek back and write the real RIFF/WAVE/fmt/data header.
+    fseek(recFile_, 0, SEEK_SET);
+
+    const uint32_t dataBytes = recBytes_;
+    const uint32_t riffSize  = 36 + dataBytes;
+    const uint32_t rate      = kAudioSampleRate;
+    const uint16_t channels  = kAudioChannels;
+    const uint16_t bits      = 16;
+    const uint32_t byteRate  = rate * channels * bits / 8;
+    const uint16_t blockAlign = static_cast<uint16_t>(channels * bits / 8);
+
+    auto w32 = [&](uint32_t v) { fwrite(&v, 4, 1, recFile_); };
+    auto w16 = [&](uint16_t v) { fwrite(&v, 2, 1, recFile_); };
+
+    fwrite("RIFF", 1, 4, recFile_); w32(riffSize);
+    fwrite("WAVE", 1, 4, recFile_);
+    fwrite("fmt ", 1, 4, recFile_); w32(16);
+    w16(1); w16(channels); w32(rate); w32(byteRate); w16(blockAlign); w16(bits);
+    fwrite("data", 1, 4, recFile_); w32(dataBytes);
+
+    fclose(recFile_);
+    recFile_  = nullptr;
+    recBytes_ = 0;
+}
+
+void AudioOut::RecordSamples(const int16_t* samples, int count)
+{
+    if (!recFile_) return;
+    const size_t bytes = static_cast<size_t>(count) * sizeof(int16_t);
+    fwrite(samples, 1, bytes, recFile_);
+    recBytes_ += static_cast<uint32_t>(bytes);
 }
 
 // ── Open / Close ──────────────────────────────────────────────────────────────

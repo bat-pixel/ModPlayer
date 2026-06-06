@@ -55,7 +55,8 @@
       "Bash(python tests/dump_info.py \"MODS/1987/mod.Ackerlight\")",
       "Bash(python tests/dump_pattern.py \"MODS/1987/mod.Sleepwalk\" 23640 12)",
       "Bash(python tests/dump_pattern.py \"MODS/1987/mod.Sleepwalk\" 23640 16)",
-      "Bash(python tests/dump_pattern.py \"MODS/1987/mod.Sleepwalk\" 24600 6)"
+      "Bash(python tests/dump_pattern.py \"MODS/1987/mod.Sleepwalk\" 24600 6)",
+      "Bash(gh pr create --title 'Add libopenmpt backend, ProTracker effect fixes, and player controls' --body ' *)"
     ]
   }
 }

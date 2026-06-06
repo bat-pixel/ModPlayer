@@ -71,7 +71,9 @@
       "PowerShell(python tests\\\\scan_effects.py MODS 2>&1 | Select-Object -Last 50)",
       "PowerShell(python tests\\\\scan_effects.py MODS 2>&1 | Select-Object -Last 20)",
       "PowerShell(python tests\\\\scan_effects.py MODS 2>&1 | Select-Object -Last 15)",
-      "PowerShell(gh issue *)"
+      "PowerShell(gh issue *)",
+      "Bash(where d3dcompiler_47.dll)",
+      "Read(//c/Windows/System32/**)"
     ]
   }
 }

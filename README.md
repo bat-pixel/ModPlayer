@@ -1,28 +1,51 @@
 # ModPlayer
 
-A Windows desktop player for Amiga ProTracker MOD files, featuring a real-time oscilloscope visualizer and two switchable playback backends.
-
-![ModPlayer screenshot](screenshots/Screenshot%202026-06-06%20082736.png)
+A Windows desktop player for Amiga ProTracker MOD files with a directory browser, real-time Amiga demo effects synced to the music, oscilloscope visualiser, and two switchable playback backends.
 
 ## Features
 
-- **Dual playback backends** — switch at runtime between a hand-written native ProTracker engine and [libopenmpt](https://lib.openmpt.org/libopenmpt/)
-- **Oscilloscope visualizer** — per-channel waveform display and peak meter, double-buffered at ~30 fps
-- **Amiga stereo panning** — channels 1 & 4 hard-panned left (blue), channels 2 & 3 hard-panned right (green)
-- **Per-channel HUD** — shows channel number, stereo side, current note (e.g. `A-2`), and volume (e.g. `v64`)
-- **Position display** — two-row banner shows current order, row, and total orders in real time
-- **Song looping** — restarts from order 0 when the song ends
-- **Recursive library scan** — locates `MODS/` relative to the executable (searches up to 4 directory levels)
-- **Effect log panel** — shows any unimplemented effects used by the loaded MOD
+- **libopenmpt backend (default)** — sounds identical to ffplay; handles MOD, XM, S3M, IT, and many more formats
+- **Native ProTracker backend** — hand-written engine, switchable at runtime
+- **Directory browser** — navigate the MODS folder hierarchy; single-click a file to play it
+- **Clickable seek bar** — jump to any position in the song (libopenmpt backend)
+- **5 Amiga demo effects** — all synced live to the music via per-channel volume and beat detection
+- **Fullscreen borderless mode** — covers the primary monitor, hides the browser
+- **Oscilloscope visualiser** — per-channel waveform + peak meter at ~30 fps
+- **Amiga hard panning** — channels 1 & 4 left (blue), 2 & 3 right (green)
+- **Recursive library scan** — finds `MODS/` up to 4 levels above the executable
+- **Effect log** — flags any unimplemented effects in the loaded MOD
 
 ## Controls
 
 | Key | Action |
 |-----|--------|
-| `Space` / `→` | Next track |
+| `Space` / `→` | Next track (flat list) |
 | `←` / `Backspace` | Previous track |
+| Single-click | Play file / navigate into folder (browser) |
+| `Enter` | Play selected / navigate (browser keyboard) |
+| `T` | Toggle browser panel |
+| `F` / `F11` | Toggle fullscreen |
 | `P` | Pause / resume |
-| `B` | Toggle backend (Native ↔ libopenmpt) |
+| `B` | Toggle backend (libopenmpt ↔ Native) |
+| `R` | Record player output → `tests/bin/player_recording.wav` (R again to stop) |
+| `0` | Oscilloscope view (default) |
+| `1` | Raster bars |
+| `2` | 3D Starfield |
+| `3` | Plasma |
+| `4` | Copper scroller |
+| `5` | Spectrum analyser |
+
+## Demo Effects
+
+All effects react live to the playing music:
+
+| Effect | Music sync |
+|--------|-----------|
+| **Raster bars** | Bar position and height scale with per-channel volume; flash on each new row |
+| **Starfield** | Warp speed driven by combined RMS energy; burst on beat; star colour tinted by L/R balance |
+| **Plasma** | Frequency and speed scale with channel volumes; colour saturation from energy |
+| **Copper scroller** | Scroll speed and sine-wave amplitude from music; copper gradient hue shifts with L/R |
+| **Spectrum** | Fast-attack/slow-decay bars per frequency band; peak markers flash on beat |
 
 ## Supported Effects (Native Backend)
 
@@ -42,6 +65,7 @@ A Windows desktop player for Amiga ProTracker MOD files, featuring a real-time o
 | `Bxx`  | Jump to Order |
 | `Cxx`  | Set Volume |
 | `Dxx`  | Pattern Break |
+| `E0x`  | LED Filter (E00 = off / bright, E01 = on / muffled) |
 | `E1x`  | Fine Portamento Up |
 | `E2x`  | Fine Portamento Down |
 | `E3x`  | Glissando Control |
@@ -49,6 +73,7 @@ A Windows desktop player for Amiga ProTracker MOD files, featuring a real-time o
 | `E5x`  | Set Finetune |
 | `E6x`  | Pattern Loop |
 | `E7x`  | Set Tremolo Waveform |
+| `E8x`  | Set Panning (0 = full left, 8 = centre, F = full right) |
 | `E9x`  | Retrigger Note |
 | `EAx`  | Fine Volume Slide Up |
 | `EBx`  | Fine Volume Slide Down |
@@ -57,7 +82,7 @@ A Windows desktop player for Amiga ProTracker MOD files, featuring a real-time o
 | `EEx`  | Pattern Delay |
 | `Fxx`  | Set Speed / BPM |
 
-The libopenmpt backend inherits full format support from libopenmpt (MOD, XM, S3M, IT, and many more).
+Not implemented in the native backend: `EFx` (Funk Repeat — extremely rare, 56 files out of 4876 scanned). Switch to the libopenmpt backend with `B` for full compatibility.
 
 ## Building
 
@@ -68,24 +93,48 @@ The libopenmpt backend inherits full format support from libopenmpt (MOD, XM, S3
 - `mpg123`
 - `libvorbis`
 
-Open `ModPlayer/ModPlayer.vcxproj` in Visual Studio and build in Release or Debug configuration for x64.
+Open `ModPlayer/ModPlayer.vcxproj` in Visual Studio and build for x64 (Debug or Release).
 
-## Tests
+## Tests and Audio Tools
 
-A standalone console test suite lives in `tests/test_audio.cpp`. Compile it alongside `ModPlayer/ModParser.cpp` and `ModPlayer/ModMixer.cpp` (no GUI dependencies). Run from the repo root:
+All tools run from the repo root.
+
+### Unit tests
 
 ```
 tests\bin\test_audio.exe
+tests\bin\test_audio.exe "MODS\Demos\Mod.Ackerlight 1.Mod"
 ```
 
-Or pass a specific MOD file as the first argument:
+22 tests: parser correctness, amplitude bounds, NaN detection, determinism, stereo panning, visualiser data.
+
+### WAV rendering (native mixer)
 
 ```
-tests\bin\test_audio.exe "MODS\1987\mod.Ackerlight"
+tests\bin\test_audio.exe --wav out.wav "MODS\Demos\Mod.Ackerlight 1.Mod" 30
 ```
 
-The suite verifies parser correctness, non-silent output, amplitude bounds, NaN/Inf detection, output determinism, stereo panning, and visualiser data — 22 tests, all passing.
+### WAV rendering (libopenmpt — identical to ffplay)
+
+```
+tests\bin\render_libopenmpt.exe "MODS\Demos\Mod.Ackerlight 1.Mod" --out out.wav --sec 30
+```
+
+### Audio comparison
+
+```
+python tests\compare_wav.py native.wav reference.wav --block-ms 200
+python tests\zoom_wav.py native.wav reference.wav 12000
+```
+
+### Effect scanner (across entire MODS library)
+
+```
+python tests\scan_effects.py MODS
+```
+
+Reports effect usage counts across all files and highlights anything the native backend does not implement.
 
 ## MOD Files
 
-Place MOD files anywhere inside the `MODS/` directory (subdirectories are scanned recursively). Files are recognised by a `.mod` extension or a `mod.` prefix. The application searches for `MODS/` starting from the executable's directory and walking up to 4 levels, so it works from any standard Visual Studio build output path.
+Place MOD files anywhere under `MODS/` (subdirectories are scanned recursively). Files are recognised by a `.mod` extension or `mod.` prefix. `MODS/` is **not** tracked in git — it lives locally only.

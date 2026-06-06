@@ -130,8 +130,9 @@ static void UpdateWindowTitle(HWND hWnd)
     std::wstring wbn(bn, bn + strlen(bn));
     std::wstring wtitle(title.begin(), title.end());
 
-    SetWindowTextW(hWnd, std::format(L"ModPlayer [{}/{}] [{}] — {}",
-        g_modIndex + 1, total, wbn, wtitle).c_str());
+    const wchar_t* recTag = g_audio.IsRecording() ? L" [REC]" : L"";
+    SetWindowTextW(hWnd, std::format(L"ModPlayer [{}/{}] [{}]{} — {}",
+        g_modIndex + 1, total, wbn, recTag, wtitle).c_str());
 }
 
 // ── Load mod at index ─────────────────────────────────────────────────────────
@@ -354,6 +355,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             InvalidateRect(hWnd, nullptr, FALSE);
         } else if (wParam == 'B') {
             SwitchBackend(hWnd);
+        } else if (wParam == 'R') {
+            if (g_audio.IsRecording()) {
+                g_audio.StopRecording();
+                MessageBoxA(hWnd,
+                    "Recording saved to:\ntests\\bin\\player_recording.wav\n\n"
+                    "Compare with tests\\bin\\native_ackerlight.wav using:\n"
+                    "python tests\\compare_wav.py tests\\bin\\native_ackerlight.wav "
+                    "tests\\bin\\player_recording.wav --block-ms 50",
+                    "Recording stopped", MB_OK | MB_ICONINFORMATION);
+            } else {
+                // Restart the current MOD from position 0 so the recording
+                // captures from the beginning of the song.
+                g_audio.SetPaused(false);
+                LoadModAtIndex(hWnd);
+                g_audio.StartRecording("tests\\bin\\player_recording.wav");
+            }
+            UpdateWindowTitle(hWnd);
         }
         break;
     }
@@ -420,7 +438,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             const int orders = g_activeMixer->SongOrders();
             SetTextColor(hdc, RGB(160, 160, 180));
             char row2[120];
-            sprintf_s(row2, "ORD %d/%d  ROW %d  |  SPC/\x1a=next  \x1b=prev  P=pause",
+            sprintf_s(row2, "ORD %d/%d  ROW %d  |  SPC/\x1a=next  \x1b=prev  P=pause  B=backend  R=record",
                       ord + 1, orders, row);
             RECT r2 = { 4, 20, W - 4, bannerH - 2 };
             DrawTextA(hdc, row2, -1, &r2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);

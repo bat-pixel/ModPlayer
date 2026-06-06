@@ -73,8 +73,11 @@ bool LoadMod(const std::string& path, ModFile& out)
         s.repeatLength = ReadBE16(h + 28) * 2u;
     }
 
-    // Song length and pattern order
-    out.songLength = d[MOD_OFFSET_SONG_LEN];
+    // Song length, restart position, and pattern order
+    out.songLength  = d[MOD_OFFSET_SONG_LEN];
+    out.restartPos  = d[MOD_OFFSET_RESTART_POS];
+    // Clamp to a valid order; 0x7F means "no defined restart" — default to 0
+    if (out.restartPos >= out.songLength) out.restartPos = 0;
     std::memcpy(out.orderTable, d + MOD_OFFSET_ORDER_TABLE, 128);
 
     // Number of patterns = highest pattern index referenced + 1

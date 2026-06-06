@@ -226,13 +226,13 @@ void ModMixer::AdvanceRow()
         row_        = breakRow_;
         breakToRow_ = false;
         if (order_ >= static_cast<int>(mod_->songLength))
-            order_ = 0;   // loop back to start
+            order_ = static_cast<int>(mod_->restartPos);
     } else {
         if (++row_ >= MOD_PATTERN_ROWS) {
             loopRow_ = 0; loopCount_ = 0;
             row_ = 0;
             if (++order_ >= static_cast<int>(mod_->songLength))
-                order_ = 0;   // loop back to start
+                order_ = static_cast<int>(mod_->restartPos);
         }
     }
 }
@@ -296,6 +296,11 @@ void ModMixer::TriggerNote(int c, const Note& n)
         ch.pos    = 0.0;
         if (!(ch.vibWave  & 4)) ch.vibPhase  = 0;
         if (!(ch.tremWave & 4)) ch.tremPhase = 0;
+    } else if (n.effect == 0x0 && n.param != 0 && ch.period > 0) {
+        // Arpeggio with no new note: reset step to base period for tick 0.
+        // Without this, the +y-semitone step left by the previous row's last
+        // tick carries into tick 0 of this row, playing the wrong pitch.
+        ch.step = StepForPeriod(ch.period, rate_);
     }
 
     // Row-0 effect side-effects

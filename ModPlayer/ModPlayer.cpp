@@ -6,6 +6,7 @@
 #include "ModMixer.h"
 #include "LibOpenMptMixer.h"
 #include "AudioOut.h"
+#include "D3DRenderer.h"
 #include <format>
 #include <filesystem>
 #include <algorithm>
@@ -43,6 +44,10 @@ static HWND g_hBrowser  = nullptr;
 static HWND g_hLog      = nullptr;
 static bool g_showBrowser = true;
 static WNDPROC g_browserOrigProc = nullptr;
+
+// ── D3D11 renderer for GPU effects ───────────────────────────────────────────
+static D3DRenderer g_d3d;
+static float       g_d3dTime = 0.f;
 
 // ── Fullscreen ────────────────────────────────────────────────────────────────
 
@@ -851,13 +856,16 @@ static void LayoutChildren(HWND hWnd)
 {
     RECT rc; GetClientRect(hWnd, &rc);
     const int W = rc.right, H = rc.bottom;
-    const int bw = (g_showBrowser && !g_fullscreen) ? kBrowserW : 0;
+    const int bw   = (g_showBrowser && !g_fullscreen) ? kBrowserW : 0;
     const int vizW = W - bw;
+    const int effH = H - kBannerH - kLogH;
 
     if (g_hLog)
         SetWindowPos(g_hLog, nullptr, 0, H - kLogH, vizW, kLogH, SWP_NOZORDER|SWP_NOACTIVATE);
     if (g_hBrowser)
         SetWindowPos(g_hBrowser, nullptr, vizW, 0, bw, H, SWP_NOZORDER|SWP_NOACTIVATE);
+    if (g_d3d.IsReady() && effH > 0)
+        g_d3d.Resize(0, kBannerH, vizW, effH);
 }
 
 // ListBox subclass: keep arrow/page/home/end for list navigation;
@@ -918,6 +926,22 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
         (LONG_PTR)BrowserSubclassProc);
 
     BrowserPopulate();
+
+    // WS_CLIPCHILDREN ensures GDI paint doesn't overdraw the D3D child HWND
+    SetWindowLong(hWnd, GWL_STYLE, GetWindowLong(hWnd, GWL_STYLE) | WS_CLIPCHILDREN);
+
+    // Init D3D renderer for effect modes 1-6
+    {
+        RECT r2; GetClientRect(hWnd, &r2);
+        const int bw   = kBrowserW;
+        const int vizW = r2.right - bw;
+        const int effH = r2.bottom - kBannerH - kLogH;
+        if (effH > 0)
+            g_d3d.Init(hWnd, 0, kBannerH, vizW, effH);
+        // Hide by default (effect mode 0 = GDI oscilloscopes)
+        if (g_d3d.GetHwnd())
+            ShowWindow(g_d3d.GetHwnd(), SW_HIDE);
+    }
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
@@ -1041,13 +1065,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         case 'F':
             ToggleFullscreen(hWnd);
             break;
-        case '0': g_effectMode = 0; InvalidateRect(hWnd,nullptr,FALSE); break;
-        case '1': g_effectMode = 1; InvalidateRect(hWnd,nullptr,FALSE); break;
-        case '2': g_effectMode = 2; g_stars.clear(); InvalidateRect(hWnd,nullptr,FALSE); break;
-        case '3': g_effectMode = 3; InvalidateRect(hWnd,nullptr,FALSE); break;
-        case '4': g_effectMode = 4; InvalidateRect(hWnd,nullptr,FALSE); break;
-        case '5': g_effectMode = 5; InvalidateRect(hWnd,nullptr,FALSE); break;
-        case '6': g_effectMode = 6; InvalidateRect(hWnd,nullptr,FALSE); break;
+        case '0':
+            g_effectMode = 0;
+            if (g_d3d.GetHwnd()) ShowWindow(g_d3d.GetHwnd(), SW_HIDE);
+            InvalidateRect(hWnd, nullptr, FALSE);
+            break;
+        case '1': case '2': case '3': case '4': case '5': case '6': {
+            int newMode = (int)(wParam - '0');
+            g_effectMode = newMode;
+            if (newMode == 2) g_stars.clear();
+            if (g_d3d.GetHwnd())
+                ShowWindow(g_d3d.GetHwnd(), newMode >= 1 ? SW_SHOW : SW_HIDE);
+            // Only invalidate the banner/log; D3D drives its own area via Present()
+            RECT br = {0, 0, 9999, kBannerH};
+            InvalidateRect(hWnd, &br, FALSE);
+            break;
+        }
         }
         break;
     }
@@ -1074,7 +1107,35 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_TIMER:
         ++g_effectTick;
-        InvalidateRect(hWnd, nullptr, FALSE);
+        g_d3dTime += 0.033f;
+        if (g_effectMode >= 1 && g_d3d.IsReady()) {
+            // Build constant buffer from current music state
+            UpdateBeatFlash();
+            ShaderCB cb{};
+            cb.time   = g_d3dTime;
+            cb.energy = MusicEnergy();
+            cb.beat   = g_beatFlash;
+            cb.resX   = (float)std::max(1, (int)(GetSystemMetrics(SM_CXSCREEN)));  // approx
+            cb.resY   = 1.f;  // updated properly below via RECT
+            {
+                RECT r2; GetClientRect(hWnd, &r2);
+                const int bw = (g_showBrowser && !g_fullscreen) ? kBrowserW : 0;
+                cb.resX = (float)(r2.right - bw);
+                cb.resY = (float)(r2.bottom - kBannerH - kLogH);
+            }
+            cb.ch0  = ScopeRms(g_activeMixer->vis[0]);
+            cb.ch1  = ScopeRms(g_activeMixer->vis[1]);
+            cb.ch2  = ScopeRms(g_activeMixer->vis[2]);
+            cb.ch3  = ScopeRms(g_activeMixer->vis[3]);
+            cb.lVol = (cb.ch0 + cb.ch3) * 0.5f;
+            cb.rVol = (cb.ch1 + cb.ch2) * 0.5f;
+            g_d3d.RenderFrame(g_effectMode, cb);
+            // Only redraw banner area in GDI (seek bar, text)
+            RECT br = {0, 0, 9999, kBannerH};
+            InvalidateRect(hWnd, &br, FALSE);
+        } else {
+            InvalidateRect(hWnd, nullptr, FALSE);
+        }
         break;
 
     // Colour the browser dark
@@ -1149,8 +1210,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         const int scopeBot = H - kLogH;
         const int scopeH   = scopeBot - scopeTop;
 
-        if (g_effectMode != 0 && scopeH > 0) {
-            // Draw chosen effect
+        if (g_effectMode != 0 && g_d3d.IsReady()) {
+            // D3D child HWND covers this area — WS_CLIPCHILDREN excludes it from GDI.
+            // Nothing to draw here; D3D renders via Present() from WM_TIMER.
+        } else if (g_effectMode != 0 && scopeH > 0) {
+            // GDI fallback when D3D is unavailable
             HBRUSH efBg = CreateSolidBrush(RGB(8,9,14));
             RECT er = {0, scopeTop, vizW, scopeBot};
             FillRect(hdc, &er, efBg); DeleteObject(efBg);
@@ -1238,6 +1302,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_DESTROY:
         KillTimer(hWnd,1);
+        g_d3d.Shutdown();
         PostQuitMessage(0);
         break;
     default:

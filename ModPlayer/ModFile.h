@@ -153,4 +153,5 @@ inline const char* NoteName(int note_index)
 
 // ── Parser ────────────────────────────────────────────────────────────────────
 bool    LoadMod(const std::string& path, ModFile& out);
-void    DumpModInfo(const ModFile& mod);  // writes to VS Output via OutputDebugStringA
+void    DumpModInfo(const ModFile& mod);     // VS Output via OutputDebugStringA
+void    DumpEffectUsage(const ModFile& mod); // prints effect frequency table to stdout + VS Output

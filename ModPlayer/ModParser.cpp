@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstring>
 #include <format>
+#include <cstdio>
+#include <array>
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -178,4 +180,66 @@ void DumpModInfo(const ModFile& mod)
             dbg(line + "\n");
         }
     }
+}
+
+// ── DumpEffectUsage ──────────────────────────────────────────────────────────
+// Prints a sorted table of every effect code used in the module.
+// Rows list: effect command, total count, and for extended effects (E) the
+// sub-command counts. Call after LoadMod() to see which effects a file uses
+// and cross-check against the implemented set.
+
+void DumpEffectUsage(const ModFile& mod)
+{
+    // [effect 0-F] -> count
+    std::array<int, 16> effectCount{};
+    effectCount.fill(0);
+    // Extended effect sub-commands [E0x..EFx] -> count
+    std::array<int, 16> extCount{};
+    extCount.fill(0);
+
+    for (const auto& pat : mod.patterns) {
+        for (const auto& row : pat) {
+            for (const auto& n : row) {
+                if (n.effect == 0 && n.param == 0) continue; // silent slot
+                effectCount[n.effect & 0xF]++;
+                if (n.effect == 0xE)
+                    extCount[(n.param >> 4) & 0xF]++;
+            }
+        }
+    }
+
+    static constexpr const char* kEffectName[16] = {
+        "0xx Arpeggio",        "1xx Portamento Up",    "2xx Portamento Down",
+        "3xx Porta-to-Note",   "4xx Vibrato",          "5xx Porta+VolSlide",
+        "6xx Vib+VolSlide",    "7xx Tremolo",          "8xx Set Panning",
+        "9xx Sample Offset",   "Axx Volume Slide",     "Bxx Jump to Order",
+        "Cxx Set Volume",      "Dxx Pattern Break",    "Exx Extended",
+        "Fxx Speed/BPM",
+    };
+    static constexpr const char* kExtName[16] = {
+        "E0x Filter",          "E1x Fine Porta Up",    "E2x Fine Porta Down",
+        "E3x Glissando",       "E4x Vib Waveform",     "E5x Set Finetune",
+        "E6x Pattern Loop",    "E7x Trem Waveform",    "E8x Set Panning(E)",
+        "E9x Retrigger",       "EAx Fine Vol Up",      "EBx Fine Vol Down",
+        "ECx Note Cut",        "EDx Note Delay",       "EEx Pattern Delay",
+        "EFx Funk Repeat",
+    };
+
+    auto out = [](const std::string& s) {
+        printf("%s", s.c_str());
+        OutputDebugStringA(s.c_str());
+    };
+
+    out(std::format("=== Effect usage: \"{}\" ===\n", mod.songName));
+    for (int e = 0; e < 16; ++e) {
+        if (effectCount[e] == 0) continue;
+        out(std::format("  {:5d}  {}\n", effectCount[e], kEffectName[e]));
+        if (e == 0xE) {
+            for (int s = 0; s < 16; ++s) {
+                if (extCount[s] == 0) continue;
+                out(std::format("         {:5d}  {}\n", extCount[s], kExtName[s]));
+            }
+        }
+    }
+    out("\n");
 }

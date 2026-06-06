@@ -85,6 +85,9 @@ static void LoadModAtIndex(HWND hWnd)
                 std::lock_guard<std::mutex> lk(g_audio.GetMutex());
                 g_mod = std::move(newMod);
                 g_nativeMixer.Init(g_mod, kAudioSampleRate);
+#ifndef NDEBUG
+                DumpEffectUsage(g_mod);
+#endif
                 UpdateWindowTitle(hWnd);
                 return;
             }
@@ -101,6 +104,9 @@ static void LoadModAtIndex(HWND hWnd)
                     g_mod = std::move(newMod);
             }
             if (loaded) {
+#ifndef NDEBUG
+                if (nativeOk) DumpEffectUsage(g_mod);
+#endif
                 UpdateWindowTitle(hWnd);
                 return;
             }
@@ -124,7 +130,13 @@ static void SwitchBackend(HWND hWnd)
             ok = g_omptMixer.Load(path, kAudioSampleRate);
             if (ok) g_activeMixer = &g_omptMixer;
         }
-        if (ok) g_audio.SetMixer(&g_omptMixer);
+        if (ok) {
+            g_audio.SetMixer(&g_omptMixer);
+        } else {
+            MessageBoxA(hWnd,
+                ("libopenmpt failed to load:\n" + path).c_str(),
+                "Switch Backend", MB_ICONWARNING | MB_OK);
+        }
     } else {
         // Switch back to native
         {
@@ -283,11 +295,29 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         FillRect(hdc, &rc, bgBrush);
         DeleteObject(bgBrush);
 
+        // Backend banner at the very top
+        const int bannerH = 20;
+        {
+            const char* bn = g_activeMixer->BackendName();
+            const bool isOmpt = (g_activeMixer != &g_nativeMixer);
+            COLORREF bannerCol = isOmpt ? RGB(255, 200, 60) : RGB(100, 200, 100);
+            HBRUSH bannerBr = CreateSolidBrush(RGB(24, 24, 36));
+            RECT br = { 0, 0, W, bannerH };
+            FillRect(hdc, &br, bannerBr);
+            DeleteObject(bannerBr);
+            SetTextColor(hdc, bannerCol);
+            SetBkMode(hdc, TRANSPARENT);
+            char bannerText[64];
+            sprintf_s(bannerText, "BACKEND: %s  (press B to toggle)", bn);
+            RECT tr = { 4, 2, W - 4, bannerH };
+            DrawTextA(hdc, bannerText, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        }
+
         // Layout
         const int panelW = W / IMixer::kVisChannels;
         const int labelH = 22;
         const int peakH  = 14;
-        const int scopeH = H - labelH - peakH - 4;
+        const int scopeH = H - bannerH - labelH - peakH - 4;
 
         // L=blue, R=green (Amiga hard-pan: L R R L)
         static const COLORREF kChColor[IMixer::kVisChannels] = {
@@ -300,11 +330,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             const auto&    cv  = g_activeMixer->vis[c];
             const COLORREF col = kChColor[c];
             const int      x0  = c * panelW;
+            const int      y0  = bannerH;  // panels start below banner
 
             // Panel divider
             HPEN divPen = CreatePen(PS_SOLID, 1, RGB(45, 45, 58));
             HPEN oldPen = static_cast<HPEN>(SelectObject(hdc, divPen));
-            MoveToEx(hdc, x0 + panelW - 1, 0, nullptr);
+            MoveToEx(hdc, x0 + panelW - 1, y0, nullptr);
             LineTo(hdc, x0 + panelW - 1, H);
             SelectObject(hdc, oldPen);
             DeleteObject(divPen);
@@ -322,11 +353,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 sprintf_s(label, "CH%d %s", c + 1, kChSide[c]);
             SetBkMode(hdc, TRANSPARENT);
             SetTextColor(hdc, col);
-            RECT lr = { x0 + 4, 2, x0 + panelW - 2, labelH };
+            RECT lr = { x0 + 4, y0 + 2, x0 + panelW - 2, y0 + labelH };
             DrawTextA(hdc, label, -1, &lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
 
             // Scope background
-            RECT sr = { x0, labelH, x0 + panelW - 1, labelH + scopeH };
+            RECT sr = { x0, y0 + labelH, x0 + panelW - 1, y0 + labelH + scopeH };
             HBRUSH scopeBg = CreateSolidBrush(RGB(10, 11, 16));
             FillRect(hdc, &sr, scopeBg);
             DeleteObject(scopeBg);
@@ -334,7 +365,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             // Centre line
             HPEN gridPen = CreatePen(PS_SOLID, 1, RGB(32, 36, 48));
             oldPen = static_cast<HPEN>(SelectObject(hdc, gridPen));
-            int cy = labelH + scopeH / 2;
+            int cy = y0 + labelH + scopeH / 2;
             MoveToEx(hdc, x0, cy, nullptr);
             LineTo(hdc, x0 + panelW - 1, cy);
             SelectObject(hdc, oldPen);
@@ -352,7 +383,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     int idx = (cv.scopePos + x * kLen / pts) & (kLen - 1);
                     float samp = cv.scope[idx];
                     int sy = cy - static_cast<int>(samp * (scopeH / 2 - 2));
-                    sy = std::clamp(sy, labelH + 1, labelH + scopeH - 2);
+                    sy = std::clamp(sy, y0 + labelH + 1, y0 + labelH + scopeH - 2);
                     poly[x] = { x0 + 1 + x, sy };
                 }
                 Polyline(hdc, poly.data(), pts);
@@ -362,7 +393,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
 
             // Peak bar
-            const int peakY = labelH + scopeH + 2;
+            const int peakY = y0 + labelH + scopeH + 2;
             RECT pbg = { x0 + 2, peakY, x0 + panelW - 2, peakY + peakH - 2 };
             HBRUSH pbgBrush = CreateSolidBrush(RGB(22, 24, 34));
             FillRect(hdc, &pbg, pbgBrush);

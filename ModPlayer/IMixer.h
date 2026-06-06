@@ -20,9 +20,12 @@ public:
     virtual std::string SongTitle() const = 0;
 
     // Playback position — read from UI thread (minor tearing is acceptable).
-    virtual int CurrentOrder() const { return 0; }
-    virtual int CurrentRow()   const { return 0; }
-    virtual int SongOrders()   const { return 0; }
+    virtual int    CurrentOrder()       const { return 0; }
+    virtual int    CurrentRow()         const { return 0; }
+    virtual int    SongOrders()         const { return 0; }
+    virtual double GetDurationSeconds() const { return 0.0; }
+    virtual double GetPositionSeconds() const { return 0.0; }
+    virtual void   SeekSeconds(double)        {}
 
     // ── Visualization ──────────────────────────────────────────────────────────
     // Written by the audio thread inside Mix(); read by the UI thread.

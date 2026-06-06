@@ -93,4 +93,5 @@ private:
 
     float lpL_ = 0.f;   // Amiga low-pass filter state (left)
     float lpR_ = 0.f;   // Amiga low-pass filter state (right)
+    bool  ledFilter_ = true;  // E0x: Amiga LED filter on/off (default on)
 };

@@ -58,7 +58,13 @@
       "Bash(python tests/dump_pattern.py \"MODS/1987/mod.Sleepwalk\" 24600 6)",
       "Bash(gh pr create --title 'Add libopenmpt backend, ProTracker effect fixes, and player controls' --body ' *)",
       "Bash(gh pr *)",
-      "Bash(git pull *)"
+      "Bash(git pull *)",
+      "PowerShell(python tests\\\\compare_wav.py tests\\\\bin\\\\native_ackerlight.wav tests\\\\bin\\\\ref_ackerlight.wav --block-ms 200 2>&1 | Select-Object -First 60)",
+      "PowerShell(python tests\\\\compare_wav.py tests\\\\bin\\\\native_ackerlight.wav tests\\\\bin\\\\ref_ackerlight.wav --block-ms 200 2>&1 | Select-Object -Last 30)",
+      "PowerShell(python tests\\\\compare_wav.py tests\\\\bin\\\\native_ackerlight.wav tests\\\\bin\\\\ref_ackerlight.wav --block-ms 50 2>&1 | Where-Object { $_ -match \"DIFF|SILENT|mismatch|Overall|Large\" })",
+      "PowerShell(git *)",
+      "PowerShell(& \"tests\\\\bin\\\\test_audio.exe\" \"MODS\\\\Demos\\\\Mod.Ackerlight 1.Mod\" 2>&1)",
+      "PowerShell(& \"tests\\\\bin\\\\test_audio.exe\" --wav \"tests\\\\bin\\\\native_ackerlight.wav\" \"MODS\\\\Demos\\\\Mod.Ackerlight 1.Mod\" 30)"
     ]
   }
 }

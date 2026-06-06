@@ -23,12 +23,16 @@ cbuffer CB : register(b0) {
 };
 
 // Fullscreen triangle from vertex ID — no vertex buffer needed.
+// Winding is CW so D3D11's default CULL_BACK keeps it (CW = front face).
+//   id=0: uv=(0,0) NDC=(-1, 1)  top-left
+//   id=1: uv=(2,0) NDC=( 3, 1)  oversized top-right  → clips to (1, 1)
+//   id=2: uv=(0,2) NDC=(-1,-3)  oversized bottom-left → clips to (-1,-1)
 void VS_Main(uint id : SV_VertexID,
              out float4 pos : SV_Position,
              out float2 uv  : TEXCOORD0)
 {
-    uv  = float2((id & 2) ? 2.0 : 0.0,
-                 (id & 1) ? 2.0 : 0.0);
+    uv  = float2((id == 1) ? 2.0 : 0.0,
+                 (id == 2) ? 2.0 : 0.0);
     pos = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0);
 }
 

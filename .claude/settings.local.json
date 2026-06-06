@@ -57,7 +57,8 @@
       "Bash(python tests/dump_pattern.py \"MODS/1987/mod.Sleepwalk\" 23640 16)",
       "Bash(python tests/dump_pattern.py \"MODS/1987/mod.Sleepwalk\" 24600 6)",
       "Bash(gh pr create --title 'Add libopenmpt backend, ProTracker effect fixes, and player controls' --body ' *)",
-      "Bash(gh pr *)"
+      "Bash(gh pr *)",
+      "Bash(git pull *)"
     ]
   }
 }

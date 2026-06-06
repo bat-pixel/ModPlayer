@@ -73,7 +73,11 @@
       "PowerShell(python tests\\\\scan_effects.py MODS 2>&1 | Select-Object -Last 15)",
       "PowerShell(gh issue *)",
       "Bash(where d3dcompiler_47.dll)",
-      "Read(//c/Windows/System32/**)"
+      "Read(//c/Windows/System32/**)",
+      "Bash(msbuild ModPlayer.sln /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\gusta\\\\source\\\\repos\\\\ModPlayer\\\\ModPlayer.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 30)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\gusta\\\\source\\\\repos\\\\ModPlayer\\\\ModPlayer\\\\ModPlayer.vcxproj\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 30)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" -version 2>&1 | Select-Object -First 3)"
     ]
   }
 }

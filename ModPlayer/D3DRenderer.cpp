@@ -221,6 +221,94 @@ float4 PS_Main(float4 svp : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
 }
 )hlsl";
 
+// Mode 7 — Neon 3D equalizer banks (4 channels × 8 bars with reflection floor)
+static const char* kPS7 = R"hlsl(
+float4 PS_Main(float4 svp : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
+    float rms[4]; rms[0]=ch0; rms[1]=ch1; rms[2]=ch2; rms[3]=ch3;
+
+    const int   NCH  = 4;     // channels across width
+    const int   NB   = 8;     // bars per channel
+    const float MIRR = 0.58;  // mirror Y (EQ above, reflection below)
+    const float GAP  = 0.08;  // gap fraction of bar slot width
+    const float BEV  = 0.10;  // right-bevel fraction of bar body width
+    const float CAPH = 0.05;  // top-cap height as fraction of bar height
+
+    float panX = uv.x * NCH;
+    int   ci   = clamp((int)panX, 0, NCH - 1);
+    float lx   = frac(panX);
+
+    float slotF = lx * NB;
+    int   bi    = clamp((int)slotF, 0, NB - 1);
+    float bf    = frac(slotF);
+
+    bool  isR = uv.y > MIRR;
+    float ey  = isR ? (uv.y - MIRR) / (1.0 - MIRR)
+                    : (MIRR - uv.y) / MIRR;
+
+    // Synthetic bar height: bell-curve shaped from single RMS + time wobble
+    float r   = rms[ci];
+    float bif = (float)bi / (float)(NB - 1);
+    float pk  = 0.38 + sin(time * 0.22 + (float)ci * 1.57) * 0.10;
+    float bel = exp(-pow((bif - pk) / 0.40, 2.0) * 4.0);
+    float wob = sin(time * (1.8 + (float)bi * 0.45) + (float)ci * 2.09) * 0.07;
+    float bh  = saturate(r * 1.7 * bel + wob * max(r, 0.08) + beat * 0.09 * bel);
+    bh = max(bh, 0.04 - bif * 0.015);
+
+    bool inGap  = bf < GAP * 0.5 || bf > 1.0 - GAP * 0.5;
+    bool inBev  = !inGap && bf > 1.0 - GAP * 0.5 - BEV;
+    bool inBody = !isR && ey < bh && !inGap;
+    bool inCap  = inBody && ey > bh * (1.0 - CAPH);
+
+    // Per-bar hue: channel + position + slow drift; warmer at bar base
+    float hue  = frac((float)ci * 0.25 + bif * 0.20 + time * 0.03);
+    float relY = saturate(ey / max(0.001, bh));
+    float3 barC = hsv(frac(hue + relY * 0.15), 0.95, 1.0);
+    float3 capC = lerp(float3(1,1,1), barC, 0.25);
+    float3 bevC = barC * 0.30;
+
+    // Background: deep purple-black with scanline + separator + floor glow
+    float3 col = float3(0.04, 0.025, 0.07);
+    col += float3(0.07, 0.02, 0.10) * step(0.5, frac(uv.y * 80.0)) * 0.07;
+    float sx = abs(frac(panX + 0.5) - 0.5) * 2.0;
+    col += hsv(hue, 0.8, 1.0) * exp(-(1.0 - sx) * 8.0) * 0.07;
+    col += float3(0.20, 0.06, 0.35) * exp(-abs(uv.y - MIRR) * 35.0) * (0.5 + r * 0.5);
+
+    // Bar body
+    if (inBody) {
+        if (inCap)
+            col = capC * (1.1 + beat * 0.6);
+        else if (inBev)
+            col = bevC;
+        else
+            col = barC * (0.88 + beat * 0.12);
+    }
+
+    // Top-edge glow halo (EQ side only)
+    if (!isR && !inGap) {
+        float gd = abs(ey - bh);
+        col += hsv(hue, 0.5, 1.0) * exp(-gd * 75.0) * bh * 0.55 * (1.0 + beat * 0.5);
+    }
+
+    // Reflection: mirror the bars downward, fade with distance
+    if (isR && !inGap) {
+        if (ey < bh) {
+            float fade = pow(1.0 - ey / max(0.001, bh), 2.0);
+            col = lerp(col, barC * 0.40, fade * 0.70);
+        }
+        col *= max(0.0, 1.0 - ey * 2.2);
+    }
+
+    // Beat flash and energy ambient
+    col += hsv(time * 0.07, 0.8, 1.0) * beat * 0.06;
+    col += hsv(hue + 0.5, 0.7, 1.0) * energy * 0.025;
+
+    float2 cv = uv * 2.0 - 1.0;
+    col *= 1.0 - saturate(dot(cv, cv) * 0.35);
+
+    return float4(saturate(pow(col, 0.82)), 1.0);
+}
+)hlsl";
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 template<class T> static void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
@@ -351,7 +439,7 @@ bool D3DRenderer::CompileShaders()
     }
 
     // Pixel shaders
-    static const char* kPSSrc[] = { kPS1, kPS2, kPS3, kPS4, kPS5, kPS6 };
+    static const char* kPSSrc[] = { kPS1, kPS2, kPS3, kPS4, kPS5, kPS6, kPS7 };
     for (int i = 0; i < kModes; ++i) {
         std::string full = BuildFullPS(kPSSrc[i]);
         if (!CompilePS(i, full.c_str())) return false;

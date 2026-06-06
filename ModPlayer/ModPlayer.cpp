@@ -1070,7 +1070,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (g_d3d.GetHwnd()) ShowWindow(g_d3d.GetHwnd(), SW_HIDE);
             InvalidateRect(hWnd, nullptr, FALSE);
             break;
-        case '1': case '2': case '3': case '4': case '5': case '6': {
+        case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
             int newMode = (int)(wParam - '0');
             g_effectMode = newMode;
             if (newMode == 2) g_stars.clear();
@@ -1196,7 +1196,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             int ords= g_activeMixer->SongOrders();
             SetTextColor(hdc, RGB(140,140,170));
             char row2[160];
-            sprintf_s(row2,"ORD %d/%d ROW %2d | SPC/\x1a\x1b=prev/next  P=pause  B=backend  F=full  T=browser  1-6=effects",
+            sprintf_s(row2,"ORD %d/%d ROW %2d | SPC/\x1a\x1b=prev/next  P=pause  B=backend  F=full  T=browser  1-7=effects",
                 ord+1,ords,row);
             RECT r2={4,20,vizW-4,38};
             DrawTextA(hdc,row2,-1,&r2,DT_LEFT|DT_VCENTER|DT_SINGLELINE);

@@ -40,7 +40,7 @@ public:
     // Resize the swap chain and reposition the child HWND.
     void Resize(int x, int y, int w, int h);
 
-    // Render one frame for effectMode in [1..6].
+    // Render one frame for effectMode in [1..7].
     void RenderFrame(int effectMode, const ShaderCB& cb);
 
     // Release all D3D resources and destroy the child HWND.
@@ -69,6 +69,6 @@ private:
     ID3D11VertexShader*     vs_     = nullptr;
     ID3D11Buffer*           cb_     = nullptr;
 
-    static constexpr int kModes = 6;   // modes 1-6
+    static constexpr int kModes = 7;   // modes 1-7
     ID3D11PixelShader*  ps_[kModes]{};
 };

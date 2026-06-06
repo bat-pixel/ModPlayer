@@ -1,6 +1,7 @@
 #include "framework.h"
 #include "ModMixer.h"
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstring>
 
@@ -44,17 +45,20 @@ static inline double StepForPeriod(uint16_t period, int rate)
     return MOD_PAL_CLOCK / (static_cast<double>(period) * 2.0 * rate);
 }
 
-// Returns the finetune-adjusted period for a given note period and sample.
-// ProTracker stores finetune as signed –8..+7 in the sample header.
+uint16_t ModMixer::FinetunedPeriod(uint16_t period, int8_t finetune) const
+{
+    if (period == 0 || finetune == 0) return period;
+    const int ftRaw = (finetune >= 0) ? static_cast<int>(finetune)
+                                      : static_cast<int>(finetune) + 16;
+    const int noteIdx = PeriodToNoteIndex(period, 0);
+    if (noteIdx < 0) return period;
+    return kPeriodTable[ftRaw & 0xF][noteIdx];
+}
+
 uint16_t ModMixer::FinetunedPeriod(uint16_t period, int sampleIdx) const
 {
     if (sampleIdx < 0 || period == 0) return period;
-    const int8_t ft = mod_->samples[sampleIdx].finetune;
-    if (ft == 0) return period;
-    const int ftRaw = (ft >= 0) ? static_cast<int>(ft) : (static_cast<int>(ft) + 16);
-    const int noteIdx = PeriodToNoteIndex(period, 0);
-    if (noteIdx < 0) return period;   // period not in table, use as-is
-    return kPeriodTable[ftRaw & 0xF][noteIdx];
+    return FinetunedPeriod(period, mod_->samples[sampleIdx].finetune);
 }
 
 std::string ModMixer::SongTitle() const
@@ -74,8 +78,18 @@ void ModMixer::Init(const ModFile& mod, int sampleRate)
     row_   = 0;
     order_ = 0;
     ch_    = {};
+    // Amiga hard-pan defaults: channels 0,3 → left; channels 1,2 → right
+    ch_[0].panL = 1.f; ch_[0].panR = 0.f;
+    ch_[1].panL = 0.f; ch_[1].panR = 1.f;
+    ch_[2].panL = 0.f; ch_[2].panR = 1.f;
+    ch_[3].panL = 1.f; ch_[3].panR = 0.f;
     jumpToOrder_ = false;
     breakToRow_  = false;
+    loopRow_     = 0;
+    loopCount_   = 0;
+    loopBack_    = false;
+    patternDelay_ = 0;
+    rowTriggered_ = false;
     playing_     = true;
     lpL_ = lpR_  = 0.f;
     vis          = {};
@@ -91,10 +105,6 @@ void ModMixer::Mix(float* stereo, int numFrames)
         std::memset(stereo, 0, numFrames * 2 * sizeof(float));
         return;
     }
-
-    // Classic Amiga hard panning: L R R L
-    static constexpr float kPanL[MOD_CHANNELS] = { 1.f, 0.f, 0.f, 1.f };
-    static constexpr float kPanR[MOD_CHANNELS] = { 0.f, 1.f, 1.f, 0.f };
 
     for (int i = 0; i < numFrames; ++i) {
         if (sampleCountdown_ == 0) {
@@ -138,8 +148,8 @@ void ModMixer::Mix(float* stereo, int numFrames)
             const float s = s0 + (s1 - s0) * frc;
             const float v = std::clamp(static_cast<int>(ch.vol) + ch.tremVol, 0, 64) / 64.f;
 
-            L += s * v * kPanL[c];
-            R += s * v * kPanR[c];
+            L += s * v * ch.panL;
+            R += s * v * ch.panR;
 
             // Visualization
             const float chSamp = s * v;
@@ -178,25 +188,40 @@ void ModMixer::ProcessTick()
 {
     if (!playing_) return;
 
-    if (tick_ == 0)
+    if (tick_ == 0 && !rowTriggered_) {
+        rowTriggered_ = true;
         ProcessRow();
-    else
+    } else if (tick_ != 0) {
         ApplyTickEffects();
+    }
 
     if (++tick_ >= speed_) {
         tick_ = 0;
-        AdvanceRow();
+        if (patternDelay_ > 0) {
+            --patternDelay_;
+            // rowTriggered_ stays true; ProcessRow won't refire on tick 0
+        } else {
+            rowTriggered_ = false;
+            AdvanceRow();
+        }
     }
 }
 
 void ModMixer::AdvanceRow()
 {
+    if (loopBack_) {
+        row_      = loopRow_;
+        loopBack_ = false;
+        return;
+    }
     if (jumpToOrder_) {
+        loopRow_ = 0; loopCount_ = 0;
         order_       = jumpOrder_;
         row_         = 0;
         jumpToOrder_ = false;
         breakToRow_  = false;
     } else if (breakToRow_) {
+        loopRow_ = 0; loopCount_ = 0;
         ++order_;
         row_        = breakRow_;
         breakToRow_ = false;
@@ -204,6 +229,7 @@ void ModMixer::AdvanceRow()
             playing_ = false;
     } else {
         if (++row_ >= MOD_PATTERN_ROWS) {
+            loopRow_ = 0; loopCount_ = 0;
             row_ = 0;
             if (++order_ >= static_cast<int>(mod_->songLength))
                 playing_ = false;
@@ -240,25 +266,31 @@ void ModMixer::TriggerNote(int c, const Note& n)
 {
     Channel& ch = ch_[c];
 
-    // Load instrument (always sets default volume when sample number present)
+    // Load instrument: copy default volume and sample finetune.
     if (n.sample > 0 && n.sample <= MOD_SAMPLES) {
         ch.sampleIdx = n.sample - 1;
         ch.vol       = mod_->samples[ch.sampleIdx].volume;
+        ch.finetune  = mod_->samples[ch.sampleIdx].finetune;
     }
 
-    // Effects 3xx/5xx: portamento — store target but suppress retrigger
+    // E5x pre-scan: override finetune before period is applied.
+    if (n.effect == 0xE && (n.param >> 4) == 0x5) {
+        const uint8_t val = n.param & 0xF;
+        ch.finetune = (val >= 8) ? static_cast<int8_t>(val - 16)
+                                 : static_cast<int8_t>(val);
+    }
+
+    // Effects 3xx/5xx: portamento — store target but suppress retrigger.
     if (n.effect == 0x3 || n.effect == 0x5) {
-        if (n.period > 0) ch.portaTarget = FinetunedPeriod(n.period, ch.sampleIdx);
+        if (n.period > 0) ch.portaTarget = FinetunedPeriod(n.period, ch.finetune);
         if (n.effect == 0x3 && n.param > 0) ch.portaSpeed = n.param;
-        // Bootstrap: if no prior period, start at target so step is non-zero
         if (ch.period == 0 && ch.portaTarget > 0) {
             ch.period = ch.portaTarget;
             ch.step   = StepForPeriod(ch.portaTarget, rate_);
             ch.pos    = 0.0;
         }
     } else if (n.period > 0) {
-        // All other effects: normal retrigger with finetune applied
-        const uint16_t adjPeriod = FinetunedPeriod(n.period, ch.sampleIdx);
+        const uint16_t adjPeriod = FinetunedPeriod(n.period, ch.finetune);
         ch.period = adjPeriod;
         ch.step   = StepForPeriod(adjPeriod, rate_);
         ch.pos    = 0.0;
@@ -268,24 +300,28 @@ void ModMixer::TriggerNote(int c, const Note& n)
 
     // Row-0 effect side-effects
     switch (n.effect) {
-    case 0x1:   // Portamento Up — store speed for per-tick use
+    case 0x1:   // Portamento Up
         if (n.param) ch.portaSpeed = n.param;
         break;
     case 0x2:   // Portamento Down
         if (n.param) ch.portaSpeed = n.param;
         break;
-    case 0x4:   // Vibrato — (re)configure speed/depth
+    case 0x4:   // Vibrato
         if (n.param >> 4)   ch.vibSpeed = n.param >> 4;
         if (n.param & 0x0F) ch.vibDepth = n.param & 0x0F;
         break;
     case 0x5:   // Portamento to note + Volume Slide
         break;
-    case 0x7:   // Tremolo — (re)configure speed/depth
+    case 0x7:   // Tremolo
         if (n.param >> 4)   ch.tremSpeed = n.param >> 4;
         if (n.param & 0x0F) ch.tremDepth = n.param & 0x0F;
         break;
-    case 0x9:   // Sample Offset — reposition within the just-triggered sample
-        if (n.period > 0) {     // only meaningful when a note triggered
+    case 0x8:   // Set Panning (non-standard, 0x00=full-left, 0x80=centre, 0xFF=full-right)
+        ch.panL = (255 - n.param) / 255.f;
+        ch.panR = n.param / 255.f;
+        break;
+    case 0x9:   // Sample Offset
+        if (n.period > 0) {
             ch.pos = static_cast<double>(n.param) * 256.0;
             if (ch.sampleIdx >= 0) {
                 double limit = static_cast<double>(mod_->samples[ch.sampleIdx].lengthBytes);
@@ -328,8 +364,31 @@ void ModMixer::TriggerNote(int c, const Note& n)
                 ch.step = StepForPeriod(ch.period, rate_);
             }
             break;
+        case 0x3: // E3x: Glissando control (0=off, else=on)
+            ch.glissando = (val != 0);
+            break;
         case 0x4: // E4x: Set vibrato waveform
             ch.vibWave = val;
+            break;
+        case 0x5: // E5x: Set finetune (handled early above; update period if note sounding)
+            if (n.period == 0 && ch.period > 0) {
+                // No new note — re-pitch the currently playing note
+                ch.period = FinetunedPeriod(ch.period, ch.finetune);
+                ch.step   = StepForPeriod(ch.period, rate_);
+            }
+            break;
+        case 0x6: // E6x: Pattern Loop
+            if (val == 0) {
+                loopRow_ = row_;
+            } else {
+                if (loopCount_ == 0) {
+                    loopCount_ = val;
+                    loopBack_  = true;
+                } else {
+                    --loopCount_;
+                    if (loopCount_ > 0) loopBack_ = true;
+                }
+            }
             break;
         case 0x7: // E7x: Set tremolo waveform
             ch.tremWave = val;
@@ -341,7 +400,11 @@ void ModMixer::TriggerNote(int c, const Note& n)
             ch.vol = static_cast<uint8_t>(std::max(0, static_cast<int>(ch.vol) - val));
             break;
         case 0xC: // ECx: Note Cut — fires per-tick in ApplyTickEffects
-        case 0xD: // EDx: Note Delay — handled in ProcessRow; TriggerNote is a no-op here
+        case 0xD: // EDx: Note Delay — handled in ProcessRow
+            break;
+        case 0xE: // EEx: Pattern Delay
+            if (val > 0) patternDelay_ = val;
+            break;
         default:
             break;
         }
@@ -421,6 +484,18 @@ void ModMixer::ApplyTickEffects()
                     ch.period = static_cast<uint16_t>(
                         std::max(static_cast<int>(ch.portaTarget),
                                  static_cast<int>(ch.period) - delta));
+
+                // E3x glissando: snap to nearest semitone in the period table
+                if (ch.glissando) {
+                    const int ftRaw = (ch.finetune >= 0) ? ch.finetune : ch.finetune + 16;
+                    int bestNi = 0, bestDist = INT_MAX;
+                    for (int ni = 0; ni < 36; ++ni) {
+                        int d = std::abs(static_cast<int>(ch.period)
+                                       - static_cast<int>(kPeriodTable[ftRaw & 0xF][ni]));
+                        if (d < bestDist) { bestDist = d; bestNi = ni; }
+                    }
+                    ch.period = kPeriodTable[ftRaw & 0xF][bestNi];
+                }
                 ch.step = StepForPeriod(ch.period, rate_);
             }
             if (n.effect == 0x5) {

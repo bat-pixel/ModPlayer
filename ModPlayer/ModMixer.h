@@ -43,6 +43,12 @@ private:
         // Note delay (effect EDx)
         uint8_t  delayTick = 0;   // 0 = none; else tick# to trigger on
         Note     delayNote = {};
+
+        // Extended effects
+        bool    glissando = false;  // E3x: snap portamento slides to semitones
+        int8_t  finetune  = 0;      // effective finetune; copied from sample, overridden by E5x
+        float   panL      = 1.f;    // left amplitude [0,1]; set from channel index or 8xx
+        float   panR      = 0.f;    // right amplitude [0,1]
     };
 
     void UpdateSamplesPerTick();
@@ -52,6 +58,7 @@ private:
     void TriggerNote(int ch, const Note& n);
     void ApplyTickEffects();
     uint16_t FinetunedPeriod(uint16_t period, int sampleIdx) const;
+    uint16_t FinetunedPeriod(uint16_t period, int8_t finetune) const;
 
     const ModFile* mod_  = nullptr;
     int            rate_ = 44100;
@@ -71,6 +78,15 @@ private:
     int   jumpOrder_   = 0;
     bool  breakToRow_  = false;
     int   breakRow_    = 0;
+
+    // E6x: Pattern Loop
+    int   loopRow_   = 0;
+    int   loopCount_ = 0;
+    bool  loopBack_  = false;
+
+    // EEx: Pattern Delay
+    int   patternDelay_ = 0;
+    bool  rowTriggered_ = false;
 
     float lpL_ = 0.f;   // Amiga low-pass filter state (left)
     float lpR_ = 0.f;   // Amiga low-pass filter state (right)

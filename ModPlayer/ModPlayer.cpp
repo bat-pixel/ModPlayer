@@ -85,6 +85,9 @@ static void LoadModAtIndex(HWND hWnd)
                 std::lock_guard<std::mutex> lk(g_audio.GetMutex());
                 g_mod = std::move(newMod);
                 g_nativeMixer.Init(g_mod, kAudioSampleRate);
+#ifndef NDEBUG
+                DumpEffectUsage(g_mod);
+#endif
                 UpdateWindowTitle(hWnd);
                 return;
             }
@@ -101,6 +104,9 @@ static void LoadModAtIndex(HWND hWnd)
                     g_mod = std::move(newMod);
             }
             if (loaded) {
+#ifndef NDEBUG
+                if (nativeOk) DumpEffectUsage(g_mod);
+#endif
                 UpdateWindowTitle(hWnd);
                 return;
             }

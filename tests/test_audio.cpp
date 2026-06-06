@@ -311,13 +311,97 @@ static void test_mixer(const std::string& validPath) {
 }
 
 // ---------------------------------------------------------------------------
+// WAV rendering
+// ---------------------------------------------------------------------------
+
+static bool write_wav(const std::string& path, const float* stereo,
+                      int frames, int rate = 44100)
+{
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) { printf("  ERROR: cannot open %s for writing\n", path.c_str()); return false; }
+
+    const int channels   = 2;
+    const int bitsPerSmp = 16;
+    const int byteRate   = rate * channels * bitsPerSmp / 8;
+    const int dataBytes  = frames * channels * (bitsPerSmp / 8);
+    const int riffSize   = 36 + dataBytes;
+
+    // RIFF header
+    auto w32 = [&](uint32_t v) { fwrite(&v, 4, 1, f); };
+    auto w16 = [&](uint16_t v) { fwrite(&v, 2, 1, f); };
+    fwrite("RIFF", 1, 4, f);  w32(riffSize);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);  w32(16);
+    w16(1);                    // PCM
+    w16(static_cast<uint16_t>(channels));
+    w32(static_cast<uint32_t>(rate));
+    w32(static_cast<uint32_t>(byteRate));
+    w16(static_cast<uint16_t>(channels * bitsPerSmp / 8));
+    w16(static_cast<uint16_t>(bitsPerSmp));
+    fwrite("data", 1, 4, f);  w32(static_cast<uint32_t>(dataBytes));
+
+    // Samples (float → int16, clamped)
+    for (int i = 0; i < frames * channels; ++i) {
+        float s = std::max(-1.f, std::min(1.f, stereo[i]));
+        int16_t v = static_cast<int16_t>(s * 32767.f);
+        fwrite(&v, 2, 1, f);
+    }
+    fclose(f);
+    return true;
+}
+
+static void render_wav(const std::string& modPath, const std::string& wavPath,
+                       int seconds = 10)
+{
+    ModFile mod;
+    if (!LoadMod(modPath, mod)) {
+        printf("  ERROR: cannot load %s\n", modPath.c_str());
+        return;
+    }
+    constexpr int kRate = 44100;
+    const int frames = kRate * seconds;
+    std::vector<float> buf(frames * 2);
+
+    ModMixer mx;
+    mx.Init(mod, kRate);
+    mx.Mix(buf.data(), frames);
+
+    if (write_wav(wavPath, buf.data(), frames, kRate))
+        printf("  Rendered %d s → %s\n", seconds, wavPath.c_str());
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    const std::string modPath = (argc > 1)
-        ? argv[1]
-        : "MODS\\1987\\mod.Ackerlight";
+    // Usage:
+    //   test_audio.exe [modpath]
+    //   test_audio.exe --wav <out.wav> [modpath] [seconds]
+    bool wavMode = false;
+    std::string wavPath;
+    std::string modPath = "MODS\\1987\\mod.Ackerlight";
+    int wavSeconds = 10;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a == "--wav" && i + 1 < argc) {
+            wavMode = true;
+            wavPath = argv[++i];
+        } else if (wavMode && wavPath.size() && i == (wavMode ? 3 : 1)) {
+            modPath = a;
+        } else if (wavMode && std::isdigit(a[0])) {
+            wavSeconds = std::stoi(a);
+        } else if (a[0] != '-') {
+            modPath = a;
+        }
+    }
+
+    if (wavMode) {
+        printf("Rendering %d s of native mixer output...\n", wavSeconds);
+        render_wav(modPath, wavPath, wavSeconds);
+        return 0;
+    }
 
     printf("ModPlayer Audio Tests\n");
     printf("MOD file: %s\n\n", modPath.c_str());

@@ -43,6 +43,7 @@ struct ModFile {
     char    songName[21]{};      // null-terminated
     char    magic[5]{};          // e.g. "M.K."
     uint8_t songLength{};        // number of entries used in orderTable
+    uint8_t restartPos{};        // order to loop back to when song ends (0x7F = no loop)
     uint8_t orderTable[128]{};   // pattern play order
 
     std::vector<Pattern>              patterns;

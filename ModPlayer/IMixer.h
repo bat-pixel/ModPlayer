@@ -19,6 +19,11 @@ public:
     // Song title as UTF-8 (may be empty).
     virtual std::string SongTitle() const = 0;
 
+    // Playback position — read from UI thread (minor tearing is acceptable).
+    virtual int CurrentOrder() const { return 0; }
+    virtual int CurrentRow()   const { return 0; }
+    virtual int SongOrders()   const { return 0; }
+
     // ── Visualization ──────────────────────────────────────────────────────────
     // Written by the audio thread inside Mix(); read by the UI thread.
     // Minor tearing is acceptable — no lock needed.

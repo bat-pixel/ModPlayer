@@ -17,6 +17,9 @@ public:
     bool        IsPlaying()   const override { return playing_; }
     const char* BackendName() const override { return "libopenmpt"; }
     std::string SongTitle()   const override;
+    int         CurrentOrder() const override { return mod_ ? static_cast<int>(mod_->get_current_order()) : 0; }
+    int         CurrentRow()   const override { return mod_ ? static_cast<int>(mod_->get_current_row())   : 0; }
+    int         SongOrders()   const override { return mod_ ? static_cast<int>(mod_->get_num_orders())    : 0; }
 
 private:
     void UpdateVis(const float* stereo, int numFrames);

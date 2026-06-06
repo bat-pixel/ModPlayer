@@ -66,7 +66,11 @@
       "PowerShell(& \"tests\\\\bin\\\\test_audio.exe\" \"MODS\\\\Demos\\\\Mod.Ackerlight 1.Mod\" 2>&1)",
       "PowerShell(& \"tests\\\\bin\\\\test_audio.exe\" --wav \"tests\\\\bin\\\\native_ackerlight.wav\" \"MODS\\\\Demos\\\\Mod.Ackerlight 1.Mod\" 30)",
       "PowerShell(Copy-Item *)",
-      "PowerShell(python tests\\\\compare_wav.py tests\\\\bin\\\\libopenmpt_ackerlight.wav tests\\\\bin\\\\ref_ackerlight.wav --block-ms 200 2>&1)"
+      "PowerShell(python tests\\\\compare_wav.py tests\\\\bin\\\\libopenmpt_ackerlight.wav tests\\\\bin\\\\ref_ackerlight.wav --block-ms 200 2>&1)",
+      "PowerShell(python tests\\\\scan_effects.py MODS 2>&1 | Select-Object -Last 40)",
+      "PowerShell(python tests\\\\scan_effects.py MODS 2>&1 | Select-Object -Last 50)",
+      "PowerShell(python tests\\\\scan_effects.py MODS 2>&1 | Select-Object -Last 20)",
+      "PowerShell(python tests\\\\scan_effects.py MODS 2>&1 | Select-Object -Last 15)"
     ]
   }
 }

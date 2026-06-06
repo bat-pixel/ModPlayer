@@ -731,13 +731,29 @@ static void LayoutChildren(HWND hWnd)
         SetWindowPos(g_hBrowser, nullptr, vizW, 0, bw, H, SWP_NOZORDER|SWP_NOACTIVATE);
 }
 
-// ListBox subclass: forward Enter/Return to parent as a double-click notification
+// ListBox subclass: keep arrow/page/home/end for list navigation;
+// forward everything else to the parent so hotkeys (F, T, 1-5, Space…) still work.
 static LRESULT CALLBACK BrowserSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    if (msg == WM_KEYDOWN && wParam == VK_RETURN) {
-        SendMessageW(GetParent(hWnd), WM_COMMAND,
-            MAKEWPARAM(1001, LBN_DBLCLK), (LPARAM)hWnd);
-        return 0;
+    if (msg == WM_KEYDOWN) {
+        switch (wParam) {
+        case VK_RETURN:
+            // Treat as double-click (play / navigate)
+            SendMessageW(GetParent(hWnd), WM_COMMAND,
+                MAKEWPARAM(1001, LBN_DBLCLK), (LPARAM)hWnd);
+            return 0;
+
+        // Navigation keys the ListBox should handle itself
+        case VK_UP: case VK_DOWN:
+        case VK_PRIOR: case VK_NEXT:
+        case VK_HOME:  case VK_END:
+            break;
+
+        default:
+            // Forward everything else to the main window
+            SendMessageW(GetParent(hWnd), WM_KEYDOWN, wParam, lParam);
+            return 0;
+        }
     }
     return CallWindowProc(g_browserOrigProc, hWnd, msg, wParam, lParam);
 }

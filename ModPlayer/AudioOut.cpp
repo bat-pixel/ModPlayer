@@ -5,12 +5,21 @@
 // ── FillBuffer ────────────────────────────────────────────────────────────────
 // Asks the mixer for one buffer's worth of float audio, converts to int16.
 
+void AudioOut::SetPaused(bool paused)
+{
+    std::lock_guard<std::mutex> lk(fillMtx_);
+    paused_ = paused;
+}
+
 void AudioOut::FillBuffer(int idx)
 {
     float floatBuf[kAudioBufFrames * kAudioChannels];
     {
         std::lock_guard<std::mutex> lk(fillMtx_);
-        mixer_->Mix(floatBuf, kAudioBufFrames);
+        if (paused_)
+            std::memset(floatBuf, 0, sizeof(floatBuf));
+        else
+            mixer_->Mix(floatBuf, kAudioBufFrames);
     }
 
     int16_t* dst = bufData_[idx];

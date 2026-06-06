@@ -226,13 +226,13 @@ void ModMixer::AdvanceRow()
         row_        = breakRow_;
         breakToRow_ = false;
         if (order_ >= static_cast<int>(mod_->songLength))
-            playing_ = false;
+            order_ = 0;   // loop back to start
     } else {
         if (++row_ >= MOD_PATTERN_ROWS) {
             loopRow_ = 0; loopCount_ = 0;
             row_ = 0;
             if (++order_ >= static_cast<int>(mod_->songLength))
-                playing_ = false;
+                order_ = 0;   // loop back to start
         }
     }
 }

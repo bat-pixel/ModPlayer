@@ -13,6 +13,9 @@ public:
     bool        IsPlaying()   const override { return playing_; }
     const char* BackendName() const override { return "Native"; }
     std::string SongTitle()   const override;
+    int         CurrentOrder() const override { return order_; }
+    int         CurrentRow()   const override { return row_; }
+    int         SongOrders()   const override { return mod_ ? static_cast<int>(mod_->songLength) : 0; }
 
 private:
     struct Channel {

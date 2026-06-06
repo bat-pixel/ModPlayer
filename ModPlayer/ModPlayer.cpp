@@ -24,7 +24,10 @@ static IMixer*          g_activeMixer = &g_nativeMixer;
 static AudioOut         g_audio;
 
 static std::vector<std::filesystem::path> g_modPaths;
-static int g_modIndex = 0;
+static int  g_modIndex = 0;
+
+// Log window for unimplemented-effect warnings
+static HWND g_hLog = nullptr;
 
 // ── File scanning ─────────────────────────────────────────────────────────────
 
@@ -38,10 +41,28 @@ static bool IsModFilename(const std::filesystem::path& p)
     return false;
 }
 
+static std::filesystem::path FindModsDir()
+{
+    namespace fs = std::filesystem;
+    WCHAR exeBuf[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, exeBuf, MAX_PATH);
+    fs::path dir = fs::path(exeBuf).parent_path();
+    // Walk up to 4 levels from the exe looking for a "MODS" subdirectory.
+    for (int depth = 0; depth <= 4; ++depth) {
+        fs::path candidate = dir / L"MODS";
+        std::error_code ec;
+        if (fs::exists(candidate, ec) && fs::is_directory(candidate, ec))
+            return candidate;
+        dir = dir.parent_path();
+    }
+    return {};
+}
+
 static void ScanModFiles()
 {
     namespace fs = std::filesystem;
-    const fs::path modsDir = R"(C:\Users\gusta\source\repos\ModPlayer\MODS)";
+    const fs::path modsDir = FindModsDir();
+    if (modsDir.empty()) return;
     try {
         for (auto& entry : fs::recursive_directory_iterator(modsDir)) {
             if (entry.is_regular_file() && IsModFilename(entry.path()))
@@ -49,6 +70,52 @@ static void ScanModFiles()
         }
         std::sort(g_modPaths.begin(), g_modPaths.end());
     } catch (...) {}
+}
+
+// ── Log window ───────────────────────────────────────────────────────────────
+
+static void LogClear()
+{
+    if (g_hLog) SetWindowTextA(g_hLog, "");
+}
+
+static void LogAppend(const std::string& line)
+{
+    if (!g_hLog) return;
+    int len = GetWindowTextLengthA(g_hLog);
+    SendMessageA(g_hLog, EM_SETSEL, len, len);
+    SendMessageA(g_hLog, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(line.c_str()));
+}
+
+// Scan the loaded MOD for effects that the native backend does not implement
+// and write warnings to the log window.
+static void LogUnimplementedEffects(const ModFile& mod)
+{
+    // Effects with no native implementation (after all recent additions)
+    static constexpr struct { uint8_t effect; uint8_t subMask; uint8_t subVal; const char* name; } kUnimpl[] = {
+        { 0xE, 0xF0, 0x00, "E0x Filter On/Off"    },
+        { 0xE, 0xF0, 0xF0, "EFx Funk Repeat"       },
+    };
+
+    std::string warnings;
+    for (const auto& u : kUnimpl) {
+        int count = 0;
+        for (const auto& pat : mod.patterns)
+            for (const auto& row : pat)
+                for (const auto& n : row)
+                    if (n.effect == u.effect && (n.param & u.subMask) == u.subVal)
+                        ++count;
+        if (count > 0)
+            warnings += std::format("  [!] {} — {} uses (not implemented)\r\n", u.name, count);
+    }
+
+    LogClear();
+    if (warnings.empty()) {
+        LogAppend("All effects in this MOD are implemented.\r\n");
+    } else {
+        LogAppend(std::format("Unimplemented effects in \"{}\":\r\n", mod.songName));
+        LogAppend(warnings);
+    }
 }
 
 // ── Window title ──────────────────────────────────────────────────────────────
@@ -85,9 +152,7 @@ static void LoadModAtIndex(HWND hWnd)
                 std::lock_guard<std::mutex> lk(g_audio.GetMutex());
                 g_mod = std::move(newMod);
                 g_nativeMixer.Init(g_mod, kAudioSampleRate);
-#ifndef NDEBUG
-                DumpEffectUsage(g_mod);
-#endif
+                LogUnimplementedEffects(g_mod);
                 UpdateWindowTitle(hWnd);
                 return;
             }
@@ -104,9 +169,8 @@ static void LoadModAtIndex(HWND hWnd)
                     g_mod = std::move(newMod);
             }
             if (loaded) {
-#ifndef NDEBUG
-                if (nativeOk) DumpEffectUsage(g_mod);
-#endif
+                if (nativeOk) LogUnimplementedEffects(g_mod);
+                else          LogAppend("(libopenmpt-only format — effect analysis unavailable)\r\n");
                 UpdateWindowTitle(hWnd);
                 return;
             }
@@ -237,10 +301,20 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
     hInst = hInstance;
 
+    // Main visualizer window (488 wide, 380 tall — extra height for log panel)
     HWND hWnd = CreateWindowW(szWindowClass, L"ModPlayer", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, 0, 488, 340, nullptr, nullptr, hInstance, nullptr);
+        CW_USEDEFAULT, 0, 488, 440, nullptr, nullptr, hInstance, nullptr);
 
     if (!hWnd) return FALSE;
+
+    // Log panel: read-only multiline edit at the bottom
+    RECT rc; GetClientRect(hWnd, &rc);
+    g_hLog = CreateWindowExA(0, "EDIT", "",
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+        0, rc.bottom - 80, rc.right, 80,
+        hWnd, nullptr, hInstance, nullptr);
+    SendMessageA(g_hLog, WM_SETFONT,
+        reinterpret_cast<WPARAM>(GetStockObject(ANSI_FIXED_FONT)), TRUE);
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
@@ -265,12 +339,29 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     }
-    case WM_KEYDOWN:
-        if (wParam == VK_SPACE) {
-            g_modIndex = (g_modIndex + 1) % static_cast<int>(g_modPaths.size());
+    case WM_KEYDOWN: {
+        const int total = static_cast<int>(g_modPaths.size());
+        if (wParam == VK_SPACE || wParam == VK_RIGHT) {
+            g_modIndex = (g_modIndex + 1) % total;
+            g_audio.SetPaused(false);
             LoadModAtIndex(hWnd);
+        } else if (wParam == VK_LEFT || wParam == VK_BACK) {
+            g_modIndex = (g_modIndex - 1 + total) % total;
+            g_audio.SetPaused(false);
+            LoadModAtIndex(hWnd);
+        } else if (wParam == 'P') {
+            g_audio.SetPaused(!g_audio.IsPaused());
+            InvalidateRect(hWnd, nullptr, FALSE);
         } else if (wParam == 'B') {
             SwitchBackend(hWnd);
+        }
+        break;
+    }
+    case WM_SIZE:
+        if (g_hLog) {
+            RECT rc; GetClientRect(hWnd, &rc);
+            SetWindowPos(g_hLog, nullptr, 0, rc.bottom - 80, rc.right, 80,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
         }
         break;
     case WM_TIMER:
@@ -295,29 +386,52 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         FillRect(hdc, &rc, bgBrush);
         DeleteObject(bgBrush);
 
-        // Backend banner at the very top
-        const int bannerH = 20;
+        // Two-row banner at the very top
+        const int bannerH = 38;  // two rows of 19px each
         {
-            const char* bn = g_activeMixer->BackendName();
+            const char* bn    = g_activeMixer->BackendName();
             const bool isOmpt = (g_activeMixer != &g_nativeMixer);
+            const bool paused = g_audio.IsPaused();
             COLORREF bannerCol = isOmpt ? RGB(255, 200, 60) : RGB(100, 200, 100);
+            COLORREF pauseCol  = RGB(255, 100, 100);
+
             HBRUSH bannerBr = CreateSolidBrush(RGB(24, 24, 36));
             RECT br = { 0, 0, W, bannerH };
             FillRect(hdc, &br, bannerBr);
             DeleteObject(bannerBr);
-            SetTextColor(hdc, bannerCol);
             SetBkMode(hdc, TRANSPARENT);
-            char bannerText[64];
-            sprintf_s(bannerText, "BACKEND: %s  (press B to toggle)", bn);
-            RECT tr = { 4, 2, W - 4, bannerH };
-            DrawTextA(hdc, bannerText, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+            // Row 1: backend name + pause indicator
+            SetTextColor(hdc, bannerCol);
+            char row1[80];
+            sprintf_s(row1, "BACKEND: %s  (B=toggle)%s", bn, paused ? "   [PAUSED]" : "");
+            if (paused) {
+                // Draw the [PAUSED] portion in red — simplest: draw whole line then overdraw
+                RECT r1 = { 4, 2, W - 4, 20 };
+                DrawTextA(hdc, row1, -1, &r1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            } else {
+                RECT r1 = { 4, 2, W - 4, 20 };
+                DrawTextA(hdc, row1, -1, &r1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            }
+
+            // Row 2: position info + key hints
+            const int ord    = g_activeMixer->CurrentOrder();
+            const int row    = g_activeMixer->CurrentRow();
+            const int orders = g_activeMixer->SongOrders();
+            SetTextColor(hdc, RGB(160, 160, 180));
+            char row2[120];
+            sprintf_s(row2, "ORD %d/%d  ROW %d  |  SPC/\x1a=next  \x1b=prev  P=pause",
+                      ord + 1, orders, row);
+            RECT r2 = { 4, 20, W - 4, bannerH - 2 };
+            DrawTextA(hdc, row2, -1, &r2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
 
-        // Layout
+        // Layout — subtract the log panel height (80px) from available scope area
+        const int logH   = 80;
         const int panelW = W / IMixer::kVisChannels;
         const int labelH = 22;
         const int peakH  = 14;
-        const int scopeH = H - bannerH - labelH - peakH - 4;
+        const int scopeH = (H - logH) - bannerH - labelH - peakH - 4;
 
         // L=blue, R=green (Amiga hard-pan: L R R L)
         static const COLORREF kChColor[IMixer::kVisChannels] = {
@@ -336,7 +450,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             HPEN divPen = CreatePen(PS_SOLID, 1, RGB(45, 45, 58));
             HPEN oldPen = static_cast<HPEN>(SelectObject(hdc, divPen));
             MoveToEx(hdc, x0 + panelW - 1, y0, nullptr);
-            LineTo(hdc, x0 + panelW - 1, H);
+            LineTo(hdc, x0 + panelW - 1, H - logH);
             SelectObject(hdc, oldPen);
             DeleteObject(divPen);
 

@@ -19,6 +19,10 @@ public:
     // Swap the active mixer. Acquires the fill mutex so the swap is race-free.
     void SetMixer(IMixer* mixer);
 
+    // Pause/resume: when paused, FillBuffer outputs silence without advancing the mixer.
+    void SetPaused(bool paused);
+    bool IsPaused() const { return paused_; }
+
     // Hold this lock before reinitialising a mixer from the UI thread.
     // FillBuffer holds it while calling Mix(), so the swap is race-free.
     std::mutex& GetMutex() { return fillMtx_; }
@@ -30,6 +34,7 @@ private:
 
     std::mutex fillMtx_;
     IMixer*    mixer_      = nullptr;
+    bool       paused_     = false;
     HWAVEOUT   hWave_      = nullptr;
     HANDLE     hEvent_     = nullptr;
     HANDLE     hStopEvent_ = nullptr;

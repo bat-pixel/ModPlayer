@@ -52,6 +52,11 @@ private:
         int8_t  finetune  = 0;      // effective finetune; copied from sample, overridden by E5x
         float   panL      = 1.f;    // left amplitude [0,1]; set from channel index or 8xx
         float   panR      = 0.f;    // right amplitude [0,1]
+
+        // EFx: Funk Repeat (Invert Loop)
+        uint8_t  funkSpeed = 0;     // EFx parameter (0 = off)
+        uint8_t  funkPhase = 0;     // accumulates per tick; inverts one byte when >= 128
+        uint32_t funkPos   = 0;     // current byte offset within loop being inverted
     };
 
     void UpdateSamplesPerTick();

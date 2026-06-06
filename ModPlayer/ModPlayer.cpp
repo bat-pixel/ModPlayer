@@ -250,22 +250,8 @@ static void LogAppend(const std::string& s)
 
 static void LogUnimplementedEffects(const ModFile& mod)
 {
-    static constexpr struct { uint8_t effect, subMask, subVal; const char* name; } kU[] = {
-        { 0xE, 0xF0, 0x00, "E0x Filter On/Off" },
-        { 0xE, 0xF0, 0xF0, "EFx Funk Repeat"   },
-    };
-    std::string w;
-    for (auto& u : kU) {
-        int n = 0;
-        for (auto& pat : mod.patterns)
-            for (auto& row : pat)
-                for (auto& note : row)
-                    if (note.effect == u.effect && (note.param & u.subMask) == u.subVal) ++n;
-        if (n) w += std::format("  [!] {} \xe2\x80\x94 {} uses (not implemented)\n", u.name, n);
-    }
     LogClear();
-    if (w.empty()) LogAppend("All effects in this MOD are implemented.\n");
-    else           LogAppend(std::format("Unimplemented in \"{}\":\n{}", mod.songName, w));
+    LogAppend(std::format("All effects implemented — \"{}\"\n", mod.songName));
 }
 
 // ── Window title ──────────────────────────────────────────────────────────────

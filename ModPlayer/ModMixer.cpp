@@ -5,6 +5,12 @@
 #include <cmath>
 #include <cstring>
 
+// ProTracker funk repeat (EFx) speed table — tick increments to funkPhase.
+// When funkPhase >= 128 a byte in the loop is inverted and phase resets.
+static constexpr uint8_t kFunkTable[16] = {
+    0, 5, 6, 7, 8, 10, 11, 13, 16, 19, 22, 26, 32, 43, 64, 128
+};
+
 // Standard ProTracker vibrato/tremolo sine table (64 entries, range -255..255)
 static constexpr int kVibSine[64] = {
       0,  24,  49,  74,  97, 120, 141, 161,
@@ -420,6 +426,14 @@ void ModMixer::TriggerNote(int c, const Note& n)
         case 0xE: // EEx: Pattern Delay
             if (val > 0) patternDelay_ = val;
             break;
+        case 0xF: // EFx: Funk Repeat (Invert Loop)
+            ch.funkSpeed = val;
+            if (val == 0) ch.funkPhase = 0;
+            else if (ch.sampleIdx >= 0) {
+                // Start inversion at the loop start
+                ch.funkPos = mod_->samples[ch.sampleIdx].repeatOffset;
+            }
+            break;
         default:
             break;
         }
@@ -572,6 +586,24 @@ void ModMixer::ApplyTickEffects()
                 ch.vol = 0;                                // ECx: Note Cut
             break;
         }
+        }
+
+        // EFx: Funk Repeat — advance phase every tick regardless of current effect;
+        // when phase overflows 128, invert one byte in the sample loop.
+        if (ch.funkSpeed > 0 && ch.sampleIdx >= 0) {
+            ch.funkPhase += kFunkTable[ch.funkSpeed & 0xF];
+            if (ch.funkPhase >= 128) {
+                ch.funkPhase = 0;
+                auto& pcm = const_cast<std::vector<int8_t>&>(mod_->sampleData[ch.sampleIdx]);
+                const SampleInfo& si = mod_->samples[ch.sampleIdx];
+                if (si.repeatLength > 2) {
+                    const uint32_t loopEnd = si.repeatOffset + si.repeatLength;
+                    if (ch.funkPos >= loopEnd) ch.funkPos = si.repeatOffset;
+                    if (ch.funkPos < pcm.size())
+                        pcm[ch.funkPos] = ~pcm[ch.funkPos];  // invert byte
+                    ++ch.funkPos;
+                }
+            }
         }
     }
 }

@@ -578,25 +578,31 @@ static void DrawEffects(HDC hdc, int x0, int y0, int W, int H, int tick)
         break;
     }
 
-    case 5: { // ── Spectrum — per-channel vol drives individual bars ──
-        // 32 bars: left channels (0,3) drive the left half, right (1,2) the right
+    case 5: { // ── Spectrum — scope RMS drives individual bars ──
+        // Use per-channel scope RMS (actual audio energy, ~0.05-0.35 typical).
+        // ChVol is the mixer's volume *setting* (often 1.0 whenever a note plays)
+        // and would keep bars pinned at the top — scope RMS is far more dynamic.
         const int nBars = 32;
         static float barLvl[32]{};
         static float barPk [32]{};
 
+        float chRms[4];
+        for (int c = 0; c < 4; ++c) chRms[c] = ScopeRms(g_activeMixer->vis[c]);
+
+        // Left channels (0, 3) spread across the left portion of the spectrum;
+        // right channels (1, 2) spread across the right portion.
+        const float lRms = (chRms[0] + chRms[3]) * 0.5f;
+        const float rRms = (chRms[1] + chRms[2]) * 0.5f;
+
         for (int b = 0; b < nBars; ++b) {
-            // Which channel group drives this bar?
             float f = (float)b / nBars;
-            float chL = ChVol(0) * powf(sinf((1.f-f)*3.14f), 2.f)
-                      + ChVol(3) * powf(sinf((1.f-f)*2.f), 2.f);
-            float chR = ChVol(1) * powf(sinf(f*3.14f), 2.f)
-                      + ChVol(2) * powf(sinf(f*2.f), 2.f);
-            float target = std::min(1.f, (chL + chR) * 1.2f + energy * 0.3f);
-            // Fast attack, slower decay
-            float attack = (target > barLvl[b]) ? 0.6f : 0.12f;
+            float lW = powf(std::max(0.f, sinf((1.f-f) * 3.14159f)), 1.5f);
+            float rW = powf(std::max(0.f, sinf(f       * 3.14159f)), 1.5f);
+            // Scale factor ~3: typical RMS 0.1-0.3 → bars at 30-90%
+            float target = std::min(1.f, (lRms*lW + rRms*rW) * 3.f + beat*0.15f);
+            float attack = (target > barLvl[b]) ? 0.55f : 0.10f;
             barLvl[b] += (target - barLvl[b]) * attack;
-            // Peak hold: drop slowly unless new peak
-            barPk[b] = std::max(barPk[b] - 0.012f, barLvl[b]);
+            barPk[b]   = std::max(barPk[b] - 0.014f, barLvl[b]);
         }
 
         int barW = W / nBars;

@@ -235,28 +235,32 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         return 1;
     }
 
-    // Find first supported 4-channel file for the native backend startup.
+    // Find and load the first file. Try libopenmpt first (sounds identical to ffplay);
+    // fall back to native for 4-channel MODs if libopenmpt is unavailable.
     {
         const int total = static_cast<int>(g_modPaths.size());
         bool found = false;
         for (int i = 0; i < total; ++i) {
-            if (LoadMod(g_modPaths[i].string(), g_mod)) {
+            const std::string path = g_modPaths[i].string();
+            if (g_omptMixer.Load(path, kAudioSampleRate)) {
                 g_modIndex = i;
+                // Also load natively (best-effort) so backend switching works.
+                LoadMod(path, g_mod);
                 found = true;
                 break;
             }
             ++g_modIndex;
         }
         if (!found) {
-            MessageBoxA(nullptr, "No supported 4-channel MOD files found", "ModPlayer", MB_ICONERROR);
+            MessageBoxA(nullptr, "No playable MOD files found", "ModPlayer", MB_ICONERROR);
             return 1;
         }
     }
 
-    g_activeMixer = &g_nativeMixer;
-    g_nativeMixer.Init(g_mod, kAudioSampleRate);
+    // Default to libopenmpt backend — sounds identical to ffplay.
+    g_activeMixer = &g_omptMixer;
 
-    if (!g_audio.Open(&g_nativeMixer)) {
+    if (!g_audio.Open(&g_omptMixer)) {
         MessageBoxA(nullptr, "waveOutOpen failed", "AudioOut error", MB_ICONERROR);
         return 1;
     }

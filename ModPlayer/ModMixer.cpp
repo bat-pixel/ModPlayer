@@ -127,8 +127,11 @@ void ModMixer::Mix(float* stereo, int numFrames)
             auto&    cv = vis[c];
 
             if (ch.sampleIdx < 0) {
-                cv.peak  *= 0.9998f;
-                cv.active = false;
+                cv.peak      *= 0.9998f;
+                cv.active     = false;
+                cv.sampleNum  = 0;
+                cv.effect     = ch.lastEffect;
+                cv.param      = ch.lastParam;
                 cv.scope[cv.scopePos & (kScopeLen - 1)] = 0.f;
                 ++cv.scopePos;
                 continue;
@@ -163,9 +166,13 @@ void ModMixer::Mix(float* stereo, int numFrames)
             cv.scope[cv.scopePos & (kScopeLen - 1)] = chSamp;
             ++cv.scopePos;
             cv.peak   = std::max(cv.peak * 0.9998f, std::abs(chSamp));
-            cv.vol    = ch.vol;
-            cv.period = ch.period;
-            cv.active = true;
+            cv.vol       = ch.vol;
+            cv.period    = ch.period;
+            cv.active    = true;
+            cv.sampleNum = static_cast<uint8_t>(ch.sampleIdx + 1);
+            std::memcpy(cv.sampleName, mod_->samples[ch.sampleIdx].name, 23);
+            cv.effect    = ch.lastEffect;
+            cv.param     = ch.lastParam;
 
             ch.pos += ch.step;
 
@@ -266,6 +273,8 @@ void ModMixer::ProcessRow()
             ch_[c].delayTick = 0;
             TriggerNote(c, n);
         }
+        ch_[c].lastEffect = n.effect;
+        ch_[c].lastParam  = n.param;
     }
 }
 

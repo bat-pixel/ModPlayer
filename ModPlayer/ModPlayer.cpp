@@ -1222,6 +1222,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             DrawEffects(hdc, 0, scopeTop, vizW, scopeH, g_effectTick);
         } else {
             // Classic 4-channel oscilloscopes — vibrant rainbow colours
+            UpdateBeatFlash();
             static const COLORREF kChCol[4] = {
                 RGB(0, 190, 255),  // CH1 L: electric cyan
                 RGB(0, 255, 110),  // CH2 R: vivid green
@@ -1243,8 +1244,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             static const char* kChSide[4] = {"L","R","R","L"};
             const int panelW = vizW / IMixer::kVisChannels;
             const int labelH = 20;
+            const int infoH  = 16;  // sample name + effect row
             const int peakH  = 12;
-            const int waveH  = scopeH - labelH - peakH - 4;
+            const int waveH  = scopeH - labelH - infoH - peakH - 6;
             const float beat = g_beatFlash;
 
             for (int c = 0; c < IMixer::kVisChannels; ++c) {
@@ -1260,7 +1262,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 LineTo(hdc, px + panelW - 1, scopeBot);
                 SelectObject(hdc, oldPen); DeleteObject(divPen);
 
-                // Label — brightens on beat
+                // ── Label row: channel / note / volume ──
                 char lbl[40];
                 if (cv.active && cv.period > 0)
                     sprintf_s(lbl,"CH%d %s %s v%d",c+1,kChSide[c],NoteName(PeriodToNoteIndex(cv.period,0)),(int)cv.vol);
@@ -1278,15 +1280,41 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 RECT lr = {px+3, py+2, px+panelW-2, py+labelH};
                 DrawTextA(hdc, lbl, -1, &lr, DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOCLIP);
 
-                // Scope bg — per-channel dark colour tint
+                // ── Info row: sample number/name + effect code ──
+                // Sample text (left): "03 DRUMHIGH"
+                char smpTxt[24] = "---";
+                if (cv.sampleNum > 0) {
+                    char nm[13] = {};
+                    strncpy_s(nm, sizeof(nm), cv.sampleName, 12);
+                    for (int i = 11; i >= 0 && nm[i] == ' '; --i) nm[i] = '\0';
+                    if (nm[0]) sprintf_s(smpTxt, "%02d %-10s", cv.sampleNum, nm);
+                    else       sprintf_s(smpTxt, "%02d", cv.sampleNum);
+                }
+                // Effect text (right): "4AB" or "---"
+                char effTxt[8] = "---";
+                if (cv.effect != 0 || cv.param != 0)
+                    sprintf_s(effTxt, "%X%02X", cv.effect, cv.param);
+
+                SetBkMode(hdc, TRANSPARENT);
+                COLORREF infoCol = RGB(
+                    std::min(255, GetRValue(col) * 2 / 3 + 20),
+                    std::min(255, GetGValue(col) * 2 / 3 + 20),
+                    std::min(255, GetBValue(col) * 2 / 3 + 20));
+                SetTextColor(hdc, infoCol);
+                RECT infoL = {px+3, py+labelH+1, px+panelW-40, py+labelH+infoH};
+                DrawTextA(hdc, smpTxt, -1, &infoL, DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOCLIP);
+                RECT infoR = {px+panelW-42, py+labelH+1, px+panelW-3, py+labelH+infoH};
+                DrawTextA(hdc, effTxt, -1, &infoR, DT_RIGHT|DT_VCENTER|DT_SINGLELINE);
+
+                // ── Scope background ── per-channel dark colour tint
                 HBRUSH sbg = CreateSolidBrush(kChBg[c]);
-                RECT sr2 = {px, py+labelH, px+panelW-1, py+labelH+waveH};
+                RECT sr2 = {px, py+labelH+infoH, px+panelW-1, py+labelH+infoH+waveH};
                 FillRect(hdc, &sr2, sbg); DeleteObject(sbg);
 
                 // Centre line — dim channel colour
                 HPEN gp = CreatePen(PS_SOLID, 1, kChDim[c]);
                 oldPen = (HPEN)SelectObject(hdc, gp);
-                int cy = py + labelH + waveH / 2;
+                int cy = py + labelH + infoH + waveH / 2;
                 MoveToEx(hdc, px, cy, nullptr); LineTo(hdc, px + panelW - 1, cy);
                 SelectObject(hdc, oldPen); DeleteObject(gp);
 
@@ -1296,23 +1324,30 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     HPEN wp = CreatePen(PS_SOLID, 2, col);
                     oldPen = (HPEN)SelectObject(hdc, wp);
                     std::vector<POINT> poly(pts);
+                    const int waveTop = py + labelH + infoH;
                     for (int x = 0; x < pts; ++x) {
                         int idx = (cv.scopePos + x * IMixer::kScopeLen / pts) & (IMixer::kScopeLen - 1);
                         int sy = cy - (int)(cv.scope[idx] * (waveH / 2 - 2));
-                        sy = std::clamp(sy, py+labelH+1, py+labelH+waveH-2);
+                        sy = std::clamp(sy, waveTop+1, waveTop+waveH-2);
                         poly[x] = {px + 1 + x, sy};
                     }
                     Polyline(hdc, poly.data(), pts);
                     SelectObject(hdc, oldPen); DeleteObject(wp);
                 }
 
-                // Peak bar — three-zone VU meter (channel colour / yellow / red)
-                int peakY = py + labelH + waveH + 2;
+                // ── VU meter bar (live RMS) + peak-hold line ──
+                // Live RMS drives the fill; cv.peak drives a 2px hold marker.
+                const float kScale = 2.5f;
+                const float rms = std::min(1.f, ScopeRms(cv) * kScale);
+                const float pkh = std::min(1.f, cv.peak * kScale);
+
+                int peakY  = py + labelH + infoH + waveH + 2;
                 HBRUSH pbg = CreateSolidBrush(RGB(12, 14, 22));
-                RECT pb = {px+2, peakY, px+panelW-2, peakY+peakH-2};
+                RECT pb    = {px+2, peakY, px+panelW-2, peakY+peakH-2};
                 FillRect(hdc, &pb, pbg); DeleteObject(pbg);
+
                 int totalW = panelW - 4;
-                int fillW  = (int)(cv.peak * totalW);
+                int fillW  = (int)(rms * totalW);
                 int zone1  = (int)(totalW * 0.72f);
                 int zone2  = (int)(totalW * 0.90f);
                 if (fillW > 0) {
@@ -1331,6 +1366,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         RECT r3b = {px+2+zone2, peakY, px+2+fillW, peakY+peakH-2};
                         FillRect(hdc, &r3b, b3); DeleteObject(b3);
                     }
+                }
+                // Peak-hold tick mark (2px wide white line)
+                int phx = (int)(pkh * totalW);
+                if (phx > 1 && phx <= totalW) {
+                    HPEN pp  = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+                    oldPen   = (HPEN)SelectObject(hdc, pp);
+                    MoveToEx(hdc, px+2+phx, peakY, nullptr);
+                    LineTo  (hdc, px+2+phx, peakY + peakH - 2);
+                    SelectObject(hdc, oldPen); DeleteObject(pp);
                 }
             }
         }

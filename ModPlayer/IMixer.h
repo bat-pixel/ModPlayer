@@ -35,11 +35,15 @@ public:
 
     struct ChannelVis {
         std::array<float, kScopeLen> scope{};
-        int      scopePos = 0;   // next write index (wraps mod kScopeLen)
-        float    peak     = 0.f; // smoothed amplitude [0, 1]
-        uint8_t  vol      = 0;   // volume [0, 64]
-        uint16_t period   = 0;   // Amiga period (0 for non-native backends)
-        bool     active   = false;
+        int      scopePos  = 0;      // next write index (wraps mod kScopeLen)
+        float    peak      = 0.f;    // slow-decay max amplitude [0, 1]
+        uint8_t  vol       = 0;      // volume [0, 64]
+        uint16_t period    = 0;      // Amiga period (0 for non-native backends)
+        bool     active    = false;
+        uint8_t  sampleNum = 0;      // instrument/sample number 1–31; 0 = none
+        char     sampleName[23]{};   // MOD sample name (null-terminated)
+        uint8_t  effect    = 0;      // effect command nibble (0x0–0xF)
+        uint8_t  param     = 0;      // effect parameter byte
     };
     std::array<ChannelVis, kVisChannels> vis{};
 };

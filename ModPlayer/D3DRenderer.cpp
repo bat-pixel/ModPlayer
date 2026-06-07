@@ -162,20 +162,21 @@ float4 PS_Main(float4 svp : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     float  barFrac = frac(uv.x * N);
     float  inBar   = step(1.0 - lvl, uv.y) * step(barFrac, 0.88);
 
-    // Height-based colour
+    // Full-spectrum rainbow: hue varies across bars + shifts with height + slow drift
     float  relY = saturate((uv.y - (1.0 - lvl)) / max(0.001, lvl));
-    float3 barC = hsv(0.35 - relY * 0.35, 0.9, 1.0);
+    float  hue  = frac(uv.x * 0.75 + time * 0.06 - relY * 0.45);
+    float3 barC = hsv(hue, 0.97, 1.0);
 
-    // Soft glow around bar top edge
+    // Vivid glow around bar top edge, offset hue for colour contrast
     float  edgeDist = abs(uv.y - (1.0 - lvl));
-    float  glow     = exp(-edgeDist * 60.0) * lvl * 0.8;
-    float3 glowC    = hsv(0.15 + beat * 0.1, 0.7, 1.0) * glow;
+    float  glow     = exp(-edgeDist * 50.0) * lvl * 1.4;
+    float3 glowC    = hsv(frac(hue + 0.15 + beat * 0.1), 0.85, 1.0) * glow;
 
-    // Peak marker glow at max
-    float3 bg = float3(0.03, 0.03, 0.07);
+    // Dark background with subtle audio-reactive colour tint
+    float3 bg  = float3(0.02, 0.02, 0.06) + hsv(frac(time * 0.03 + uv.x * 0.2), 0.9, 1.0) * energy * 0.04;
     float3 col = lerp(bg + glowC, barC, inBar);
-    col = pow(saturate(col), 0.8);
-    return float4(col * (0.8 + energy * 0.2 + beat * 0.15), 1.0);
+    col = pow(saturate(col), 0.75);
+    return float4(col * (0.85 + energy * 0.15 + beat * 0.2), 1.0);
 }
 )hlsl";
 
@@ -259,48 +260,48 @@ float4 PS_Main(float4 svp : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     bool inBody = !isR && ey < bh && !inGap;
     bool inCap  = inBody && ey > bh * (1.0 - CAPH);
 
-    // Per-bar hue: channel + position + slow drift; warmer at bar base
-    float hue  = frac((float)ci * 0.25 + bif * 0.20 + time * 0.03);
+    // Per-bar hue: channel + wider position spread + faster drift; shifts more with height
+    float hue  = frac((float)ci * 0.25 + bif * 0.35 + time * 0.05);
     float relY = saturate(ey / max(0.001, bh));
-    float3 barC = hsv(frac(hue + relY * 0.15), 0.95, 1.0);
-    float3 capC = lerp(float3(1,1,1), barC, 0.25);
-    float3 bevC = barC * 0.30;
+    float3 barC = hsv(frac(hue + relY * 0.30), 0.98, 1.0);
+    float3 capC = lerp(float3(1,1,1), barC, 0.20);
+    float3 bevC = barC * 0.55;
 
-    // Background: deep purple-black with scanline + separator + floor glow
-    float3 col = float3(0.04, 0.025, 0.07);
-    col += float3(0.07, 0.02, 0.10) * step(0.5, frac(uv.y * 80.0)) * 0.07;
+    // Background: deep purple-black with scanline + brighter separator + vivid floor glow
+    float3 col = float3(0.03, 0.02, 0.06);
+    col += float3(0.08, 0.03, 0.12) * step(0.5, frac(uv.y * 80.0)) * 0.08;
     float sx = abs(frac(panX + 0.5) - 0.5) * 2.0;
-    col += hsv(hue, 0.8, 1.0) * exp(-(1.0 - sx) * 8.0) * 0.07;
-    col += float3(0.20, 0.06, 0.35) * exp(-abs(uv.y - MIRR) * 35.0) * (0.5 + r * 0.5);
+    col += hsv(hue, 0.9, 1.0) * exp(-(1.0 - sx) * 6.0) * 0.14;
+    col += float3(0.28, 0.08, 0.50) * exp(-abs(uv.y - MIRR) * 28.0) * (0.6 + r * 0.9);
 
     // Bar body
     if (inBody) {
         if (inCap)
-            col = capC * (1.1 + beat * 0.6);
+            col = capC * (1.3 + beat * 0.8);
         else if (inBev)
             col = bevC;
         else
-            col = barC * (0.88 + beat * 0.12);
+            col = barC * (0.90 + beat * 0.15);
     }
 
-    // Top-edge glow halo (EQ side only)
+    // Top-edge glow halo (EQ side only) — wider and more saturated
     if (!isR && !inGap) {
         float gd = abs(ey - bh);
-        col += hsv(hue, 0.5, 1.0) * exp(-gd * 75.0) * bh * 0.55 * (1.0 + beat * 0.5);
+        col += hsv(frac(hue + 0.08), 0.7, 1.0) * exp(-gd * 60.0) * bh * 0.80 * (1.0 + beat * 0.7);
     }
 
     // Reflection: mirror the bars downward, fade with distance
     if (isR && !inGap) {
         if (ey < bh) {
             float fade = pow(1.0 - ey / max(0.001, bh), 2.0);
-            col = lerp(col, barC * 0.40, fade * 0.70);
+            col = lerp(col, barC * 0.55, fade * 0.75);
         }
         col *= max(0.0, 1.0 - ey * 2.2);
     }
 
-    // Beat flash and energy ambient
-    col += hsv(time * 0.07, 0.8, 1.0) * beat * 0.06;
-    col += hsv(hue + 0.5, 0.7, 1.0) * energy * 0.025;
+    // Beat flash and energy ambient — brighter and more colourful
+    col += hsv(time * 0.07, 0.9, 1.0) * beat * 0.12;
+    col += hsv(hue + 0.5, 0.85, 1.0) * energy * 0.045;
 
     float2 cv = uv * 2.0 - 1.0;
     col *= 1.0 - saturate(dot(cv, cv) * 0.35);

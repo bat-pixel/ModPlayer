@@ -1066,6 +1066,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             ToggleFullscreen(hWnd);
             break;
         case '0':
+        case '8':
             g_effectMode = 0;
             if (g_d3d.GetHwnd()) ShowWindow(g_d3d.GetHwnd(), SW_HIDE);
             InvalidateRect(hWnd, nullptr, FALSE);
@@ -1196,7 +1197,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             int ords= g_activeMixer->SongOrders();
             SetTextColor(hdc, RGB(140,140,170));
             char row2[160];
-            sprintf_s(row2,"ORD %d/%d ROW %2d | SPC/\x1a\x1b=prev/next  P=pause  B=backend  F=full  T=browser  1-7=effects",
+            sprintf_s(row2,"ORD %d/%d ROW %2d | SPC/\x1a\x1b=prev/next  P=pause  B=backend  F=full  T=browser  0/8=scopes  1-7=effects",
                 ord+1,ords,row);
             RECT r2={4,20,vizW-4,38};
             DrawTextA(hdc,row2,-1,&r2,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
@@ -1220,30 +1221,46 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             FillRect(hdc, &er, efBg); DeleteObject(efBg);
             DrawEffects(hdc, 0, scopeTop, vizW, scopeH, g_effectTick);
         } else {
-            // Classic 4-channel oscilloscopes
+            // Classic 4-channel oscilloscopes — vibrant rainbow colours
             static const COLORREF kChCol[4] = {
-                RGB(64,148,255), RGB(64,220,128),
-                RGB(64,220,128), RGB(64,148,255)
+                RGB(0, 190, 255),  // CH1 L: electric cyan
+                RGB(0, 255, 110),  // CH2 R: vivid green
+                RGB(255, 110, 0),  // CH3 R: vivid orange
+                RGB(210, 0, 255),  // CH4 L: violet
+            };
+            static const COLORREF kChBg[4] = {
+                RGB(0, 8, 20),     // CH1 dark tint
+                RGB(0, 14, 6),     // CH2
+                RGB(20, 6, 0),     // CH3
+                RGB(14, 0, 20),    // CH4
+            };
+            static const COLORREF kChDim[4] = {
+                RGB(0, 38, 60),    // CH1 dim centre line / divider
+                RGB(0, 50, 22),    // CH2
+                RGB(60, 22, 0),    // CH3
+                RGB(50, 0, 60),    // CH4
             };
             static const char* kChSide[4] = {"L","R","R","L"};
             const int panelW = vizW / IMixer::kVisChannels;
             const int labelH = 20;
             const int peakH  = 12;
             const int waveH  = scopeH - labelH - peakH - 4;
+            const float beat = g_beatFlash;
 
             for (int c = 0; c < IMixer::kVisChannels; ++c) {
-                const auto& cv = g_activeMixer->vis[c];
+                const auto& cv  = g_activeMixer->vis[c];
                 const COLORREF col = kChCol[c];
                 const int px = c * panelW;
                 const int py = scopeTop;
 
-                HPEN divPen = CreatePen(PS_SOLID,1,RGB(35,38,52));
-                HPEN oldPen = (HPEN)SelectObject(hdc,divPen);
-                MoveToEx(hdc,px+panelW-1,py,nullptr);
-                LineTo(hdc,px+panelW-1,scopeBot);
-                SelectObject(hdc,oldPen); DeleteObject(divPen);
+                // Divider — dim channel colour
+                HPEN divPen = CreatePen(PS_SOLID, 1, kChDim[c]);
+                HPEN oldPen = (HPEN)SelectObject(hdc, divPen);
+                MoveToEx(hdc, px + panelW - 1, py, nullptr);
+                LineTo(hdc, px + panelW - 1, scopeBot);
+                SelectObject(hdc, oldPen); DeleteObject(divPen);
 
-                // Label
+                // Label — brightens on beat
                 char lbl[40];
                 if (cv.active && cv.period > 0)
                     sprintf_s(lbl,"CH%d %s %s v%d",c+1,kChSide[c],NoteName(PeriodToNoteIndex(cv.period,0)),(int)cv.vol);
@@ -1251,46 +1268,70 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     sprintf_s(lbl,"CH%d %s v%d",c+1,kChSide[c],(int)cv.vol);
                 else
                     sprintf_s(lbl,"CH%d %s",c+1,kChSide[c]);
-                SetBkMode(hdc,TRANSPARENT);
-                SetTextColor(hdc,col);
-                RECT lr={px+3,py+2,px+panelW-2,py+labelH};
-                DrawTextA(hdc,lbl,-1,&lr,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOCLIP);
+                SetBkMode(hdc, TRANSPARENT);
+                int bf = (int)(beat * 55);
+                COLORREF labelCol = RGB(
+                    std::min(255, GetRValue(col) + bf),
+                    std::min(255, GetGValue(col) + bf),
+                    std::min(255, GetBValue(col) + bf));
+                SetTextColor(hdc, labelCol);
+                RECT lr = {px+3, py+2, px+panelW-2, py+labelH};
+                DrawTextA(hdc, lbl, -1, &lr, DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOCLIP);
 
-                // Scope bg
-                HBRUSH sbg = CreateSolidBrush(RGB(8,9,14));
-                RECT sr2={px,py+labelH,px+panelW-1,py+labelH+waveH};
-                FillRect(hdc,&sr2,sbg); DeleteObject(sbg);
+                // Scope bg — per-channel dark colour tint
+                HBRUSH sbg = CreateSolidBrush(kChBg[c]);
+                RECT sr2 = {px, py+labelH, px+panelW-1, py+labelH+waveH};
+                FillRect(hdc, &sr2, sbg); DeleteObject(sbg);
 
-                // Centre line
-                HPEN gp=CreatePen(PS_SOLID,1,RGB(28,32,44));
-                oldPen=(HPEN)SelectObject(hdc,gp);
-                int cy=py+labelH+waveH/2;
-                MoveToEx(hdc,px,cy,nullptr); LineTo(hdc,px+panelW-1,cy);
-                SelectObject(hdc,oldPen); DeleteObject(gp);
+                // Centre line — dim channel colour
+                HPEN gp = CreatePen(PS_SOLID, 1, kChDim[c]);
+                oldPen = (HPEN)SelectObject(hdc, gp);
+                int cy = py + labelH + waveH / 2;
+                MoveToEx(hdc, px, cy, nullptr); LineTo(hdc, px + panelW - 1, cy);
+                SelectObject(hdc, oldPen); DeleteObject(gp);
 
-                // Waveform
+                // Waveform — 2px pen
                 const int pts = panelW - 2;
                 if (pts > 0 && (cv.active || cv.peak > 0.001f)) {
-                    HPEN wp=CreatePen(PS_SOLID,1,col);
-                    oldPen=(HPEN)SelectObject(hdc,wp);
+                    HPEN wp = CreatePen(PS_SOLID, 2, col);
+                    oldPen = (HPEN)SelectObject(hdc, wp);
                     std::vector<POINT> poly(pts);
-                    for (int x=0;x<pts;++x) {
-                        int idx=(cv.scopePos+x*IMixer::kScopeLen/pts)&(IMixer::kScopeLen-1);
-                        int sy=cy-(int)(cv.scope[idx]*(waveH/2-2));
-                        sy=std::clamp(sy,py+labelH+1,py+labelH+waveH-2);
-                        poly[x]={px+1+x,sy};
+                    for (int x = 0; x < pts; ++x) {
+                        int idx = (cv.scopePos + x * IMixer::kScopeLen / pts) & (IMixer::kScopeLen - 1);
+                        int sy = cy - (int)(cv.scope[idx] * (waveH / 2 - 2));
+                        sy = std::clamp(sy, py+labelH+1, py+labelH+waveH-2);
+                        poly[x] = {px + 1 + x, sy};
                     }
-                    Polyline(hdc,poly.data(),pts);
-                    SelectObject(hdc,oldPen); DeleteObject(wp);
+                    Polyline(hdc, poly.data(), pts);
+                    SelectObject(hdc, oldPen); DeleteObject(wp);
                 }
 
-                // Peak bar
-                int peakY=py+labelH+waveH+2;
-                HBRUSH pbg=CreateSolidBrush(RGB(18,20,30));
-                RECT pb={px+2,peakY,px+panelW-2,peakY+peakH-2};
-                FillRect(hdc,&pb,pbg); DeleteObject(pbg);
-                int px2=(int)(cv.peak*(panelW-4));
-                if (px2>0){HBRUSH pf=CreateSolidBrush(col);RECT pf2={px+2,peakY,px+2+px2,peakY+peakH-2};FillRect(hdc,&pf2,pf);DeleteObject(pf);}
+                // Peak bar — three-zone VU meter (channel colour / yellow / red)
+                int peakY = py + labelH + waveH + 2;
+                HBRUSH pbg = CreateSolidBrush(RGB(12, 14, 22));
+                RECT pb = {px+2, peakY, px+panelW-2, peakY+peakH-2};
+                FillRect(hdc, &pb, pbg); DeleteObject(pbg);
+                int totalW = panelW - 4;
+                int fillW  = (int)(cv.peak * totalW);
+                int zone1  = (int)(totalW * 0.72f);
+                int zone2  = (int)(totalW * 0.90f);
+                if (fillW > 0) {
+                    int e1 = std::min(fillW, zone1);
+                    HBRUSH b1 = CreateSolidBrush(col);
+                    RECT r1b = {px+2, peakY, px+2+e1, peakY+peakH-2};
+                    FillRect(hdc, &r1b, b1); DeleteObject(b1);
+                    if (fillW > zone1) {
+                        int e2 = std::min(fillW, zone2);
+                        HBRUSH b2 = CreateSolidBrush(RGB(255, 210, 0));
+                        RECT r2b = {px+2+zone1, peakY, px+2+e2, peakY+peakH-2};
+                        FillRect(hdc, &r2b, b2); DeleteObject(b2);
+                    }
+                    if (fillW > zone2) {
+                        HBRUSH b3 = CreateSolidBrush(RGB(255, 50, 0));
+                        RECT r3b = {px+2+zone2, peakY, px+2+fillW, peakY+peakH-2};
+                        FillRect(hdc, &r3b, b3); DeleteObject(b3);
+                    }
+                }
             }
         }
 

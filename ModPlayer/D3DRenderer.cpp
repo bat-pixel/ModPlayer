@@ -159,17 +159,19 @@ float4 PS_Main(float4 svp : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     float     rR  = (ch1 + ch2) * 0.5;
     float     lvl = min(1.0, (lR * lW + rR * rW) * 3.0 + beat * 0.18);
 
+    // Pixel-consistent bar gap: 2px gap regardless of window width
+    float  gapFrac = max(0.02, 2.0 * N / resX);
     float  barFrac = frac(uv.x * N);
-    float  inBar   = step(1.0 - lvl, uv.y) * step(barFrac, 0.88);
+    float  inBar   = step(1.0 - lvl, uv.y) * step(barFrac, 1.0 - gapFrac);
 
     // Full-spectrum rainbow: hue varies across bars + shifts with height + slow drift
     float  relY = saturate((uv.y - (1.0 - lvl)) / max(0.001, lvl));
     float  hue  = frac(uv.x * 0.75 + time * 0.06 - relY * 0.45);
     float3 barC = hsv(hue, 0.97, 1.0);
 
-    // Vivid glow around bar top edge, offset hue for colour contrast
+    // Vivid glow scaled to ~12px width regardless of window height
     float  edgeDist = abs(uv.y - (1.0 - lvl));
-    float  glow     = exp(-edgeDist * 50.0) * lvl * 1.4;
+    float  glow     = exp(-edgeDist * resY * 0.07) * lvl * 1.4;
     float3 glowC    = hsv(frac(hue + 0.15 + beat * 0.1), 0.85, 1.0) * glow;
 
     // Dark background with subtle audio-reactive colour tint
@@ -267,12 +269,12 @@ float4 PS_Main(float4 svp : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     float3 capC = lerp(float3(1,1,1), barC, 0.20);
     float3 bevC = barC * 0.55;
 
-    // Background: deep purple-black with scanline + brighter separator + vivid floor glow
+    // Background: deep purple-black with pixel-scaled scanlines + vivid separator + floor glow
     float3 col = float3(0.03, 0.02, 0.06);
-    col += float3(0.08, 0.03, 0.12) * step(0.5, frac(uv.y * 80.0)) * 0.08;
+    col += float3(0.08, 0.03, 0.12) * step(0.5, frac(uv.y * resY * 0.25)) * 0.08;
     float sx = abs(frac(panX + 0.5) - 0.5) * 2.0;
-    col += hsv(hue, 0.9, 1.0) * exp(-(1.0 - sx) * 6.0) * 0.14;
-    col += float3(0.28, 0.08, 0.50) * exp(-abs(uv.y - MIRR) * 28.0) * (0.6 + r * 0.9);
+    col += hsv(hue, 0.9, 1.0) * exp(-(1.0 - sx) * resX * 0.006) * 0.14;
+    col += float3(0.28, 0.08, 0.50) * exp(-abs(uv.y - MIRR) * resY * 0.028) * (0.6 + r * 0.9);
 
     // Bar body
     if (inBody) {
@@ -284,10 +286,10 @@ float4 PS_Main(float4 svp : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
             col = barC * (0.90 + beat * 0.15);
     }
 
-    // Top-edge glow halo (EQ side only) — wider and more saturated
+    // Top-edge glow halo (EQ side only) — pixel-scaled ~10px width
     if (!isR && !inGap) {
         float gd = abs(ey - bh);
-        col += hsv(frac(hue + 0.08), 0.7, 1.0) * exp(-gd * 60.0) * bh * 0.80 * (1.0 + beat * 0.7);
+        col += hsv(frac(hue + 0.08), 0.7, 1.0) * exp(-gd * resY * MIRR * 0.06) * bh * 0.80 * (1.0 + beat * 0.7);
     }
 
     // Reflection: mirror the bars downward, fade with distance

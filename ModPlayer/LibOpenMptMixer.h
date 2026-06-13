@@ -3,6 +3,7 @@
 #include <libopenmpt/libopenmpt.hpp>
 #include <memory>
 #include <string>
+#include <vector>
 
 // Playback backend backed by libopenmpt.
 // Supports all formats libopenmpt handles (MOD, XM, S3M, IT, …).
@@ -30,4 +31,12 @@ private:
     std::unique_ptr<openmpt::module> mod_;
     int  rate_    = 44100;
     bool playing_ = false;
+
+    // Per-panel synthetic-scope state. libopenmpt doesn't expose per-channel PCM,
+    // so each panel's oscilloscope is synthesised from its dominant channel's VU
+    // level and latched note pitch — keeping the waveform in sync with the label.
+    // Modules with >4 channels are folded onto the 4 panels (contiguous groups).
+    float visPhase_[kVisChannels] = {};   // running oscillator phase
+    float visAmp_  [kVisChannels] = {};   // smoothed amplitude envelope
+    std::vector<int> chNote_;             // latched semitone per module channel (-1 = none)
 };
